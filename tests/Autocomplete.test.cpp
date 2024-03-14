@@ -161,6 +161,22 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
+
+TEST_CASE_FIXTURE(ACFixture, "idk")
+{
+    CheckResult check1 = check(R"(
+    local AmongUs = {}
+    AmongUs.Hello = "Yo"
+
+    function AmongUs:something(a123: typeof({a ="LOL"}), b123)
+        a123.@2
+    end
+)");
+
+    auto ac2 = autocomplete('2');
+}
+
+
 TEST_CASE_FIXTURE(ACFixture, "local_initializer")
 {
     check("local a = @1");
