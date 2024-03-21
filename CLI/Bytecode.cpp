@@ -18,6 +18,7 @@ struct GlobalOptions
 {
     int optimizationLevel = 1;
     int debugLevel = 1;
+    bool analyzeBytecode = false;
 } globalOptions;
 
 static Luau::CompileOptions copts()
@@ -39,6 +40,7 @@ static void displayHelp(const char* argv0)
     printf("  -g<n>: compile with debug level n (default 1, n should be between 0 and 2).\n");
     printf("  --fflags=<fflags>: flags to be enabled.\n");
     printf("  --summary-file=<filename>: file in which bytecode analysis summary will be recorded (default 'bytecode-summary.json').\n");
+    printf("  -c Analyze Compiled Bytecode\n");
 
     exit(0);
 }
@@ -50,6 +52,10 @@ static bool parseArgs(int argc, char** argv, std::string& summaryFile)
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
         {
             displayHelp(argv[0]);
+        }
+        else if (strncmp(argv[i], "-c", 2) == 0)
+        {
+            globalOptions.analyzeBytecode = true;
         }
         else if (strncmp(argv[i], "-O", 2) == 0)
         {
@@ -156,6 +162,51 @@ static bool analyzeFile(const char* name, const unsigned nestingLimit, std::vect
 
     return true;
 }
+
+static bool analyzeBytecodeFile(const char* name, const unsigned nestingLimit)
+{
+    std::optional<std::string> source = readFile(name);
+
+    if (!source)
+    {
+        fprintf(stderr, "Error opening %s\n", name);
+        return false;
+    }
+
+    try
+    {
+        const std::string& bytecode = *source;
+
+        std::unique_ptr<lua_State, void (*)(lua_State*)> globalState(luaL_newstate(), lua_close);
+        lua_State* L = globalState.get();
+
+        if (luau_load(L, name, bytecode.data(), bytecode.size(), 0) == 0)
+        {
+            
+            //summaries = Luau::CodeGen::summarizeBytecode(L, -1, nestingLimit);
+            return true;
+        }
+        else
+        {
+            fprintf(stderr, "Error loading bytecode %s\n", name);
+            return false;
+        }
+    }
+    catch (Luau::ParseErrors& e)
+    {
+        for (auto& error : e.getErrors())
+            reportError(name, error);
+        return false;
+    }
+    catch (Luau::CompileError& e)
+    {
+        reportError(name, e);
+        return false;
+    }
+
+    return true;
+}
+
 
 static std::string escapeFilename(const std::string& filename)
 {
@@ -278,18 +329,28 @@ int main(int argc, char** argv)
     size_t fileCount = files.size();
 
     std::vector<std::vector<FunctionBytecodeSummary>> scriptSummaries;
-    scriptSummaries.reserve(fileCount);
+    scriptSummaries.resize(fileCount);
 
-    for (size_t i = 0; i < fileCount; ++i)
+    if (globalOptions.analyzeBytecode == false)
     {
-        if (!analyzeFile(files[i].c_str(), nestingLimit, scriptSummaries[i]))
+        for (size_t i = 0; i < fileCount; ++i)
+        {
+            if (!analyzeFile(files[i].c_str(), nestingLimit, scriptSummaries[i]))
+                return 1;
+        }
+
+        if (!serializeSummaries(files, scriptSummaries, summaryFile))
             return 1;
+
+        fprintf(stdout, "Bytecode summary written to '%s'\n", summaryFile.c_str());
     }
-
-    if (!serializeSummaries(files, scriptSummaries, summaryFile))
-        return 1;
-
-    fprintf(stdout, "Bytecode summary written to '%s'\n", summaryFile.c_str());
+    else
+    {
+        for (size_t i = 0; i < fileCount; ++i)
+        {
+            analyzeBytecodeFile(files[i].c_str(), nestingLimit);
+        }
+    }
 
     return 0;
 }
