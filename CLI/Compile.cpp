@@ -49,6 +49,7 @@ struct GlobalOptions
     const char* vectorLib = nullptr;
     const char* vectorCtor = nullptr;
     const char* vectorType = nullptr;
+    bool outputBytecode = false;
 } globalOptions;
 
 static Luau::CompileOptions copts()
@@ -382,6 +383,32 @@ static bool compileFile(const char* name, CompileFormat format, Luau::CodeGen::A
             break;
         }
 
+
+        if (globalOptions.outputBytecode == true)
+        {
+            std::string outputFileName = std::string(name);
+            outputFileName.append(".luac");
+
+            FILE* file = fopen(outputFileName.c_str(), "w");
+
+            fwrite(bcb.getBytecode().data(), 1, bcb.getBytecode().size(), file);
+
+            fclose(file);
+        }
+        if (globalOptions.outputBytecode == true)
+        {
+            // Next
+            std::string outputFileName = std::string(name);
+            outputFileName.append(".luac_s");
+
+            FILE* file = fopen(outputFileName.c_str(), "w");
+
+            fwrite(bcb.dumpEverything().c_str(), 1, bcb.dumpEverything().size(), file);
+
+            fclose(file);
+        }
+
+
         return true;
     }
     catch (Luau::ParseErrors& e)
@@ -416,6 +443,7 @@ static void displayHelp(const char* argv0)
     printf("  --vector-lib=<name>: name of the library providing vector type operations.\n");
     printf("  --vector-ctor=<name>: name of the function constructing a vector value.\n");
     printf("  --vector-type=<name>: name of the vector type.\n");
+    printf("  --output: Will output the bytecode on the files.\n");
 }
 
 static int assertionHandler(const char* expr, const char* file, int line, const char* function)
@@ -554,6 +582,10 @@ int main(int argc, char** argv)
         else if (strncmp(argv[i], "--vector-type=", 14) == 0)
         {
             globalOptions.vectorType = argv[i] + 14;
+        }
+        else if (strcmp(argv[i], "--output") == 0)
+        {
+            globalOptions.outputBytecode = true;
         }
         else if (argv[i][0] == '-' && argv[i][1] == '-' && getCompileFormat(argv[i] + 2))
         {

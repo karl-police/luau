@@ -40,7 +40,7 @@ static void displayHelp(const char* argv0)
     printf("  -g<n>: compile with debug level n (default 1, n should be between 0 and 2).\n");
     printf("  --fflags=<fflags>: flags to be enabled.\n");
     printf("  --summary-file=<filename>: file in which bytecode analysis summary will be recorded (default 'bytecode-summary.json').\n");
-    printf("  -c Analyze Compiled Bytecode\n");
+    printf("  -c Analyze Compiled Bytecode (Custom)\n");
 
     exit(0);
 }
