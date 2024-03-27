@@ -11,6 +11,13 @@
 #include "Flags.h"
 
 #include "lobject.h"
+#include "Luau/IrBuilder.h"
+#include "CodeGenLower.h"
+
+#include "lua.h"
+#include "lapi.h"
+#include "lobject.h"
+#include "lstate.h"
 
 #include <memory>
 
@@ -20,11 +27,61 @@ static void displayHelp(const char* argv0)
 
     exit(0);
 }
-    
+
+
+
+class BytecodeParser
+{
+public:
+    Luau::BytecodeBuilder bcb;
+
+
+    void parseProto(Proto* proto);
+};
+
+
+
+void BytecodeParser::parseProto(Proto* proto)
+{
+    for (int i = 0; i < proto->sizecode; i++)
+    {
+        Instruction insn = proto->code[i];
+        uint8_t op = LUAU_INSN_OP(insn);
+
+
+        switch (op)
+        {
+        case LOP_LOADNIL:
+        {
+            bcb.addConstantNil();
+            break;
+        }
+        case LOP_LOADK:
+        {
+            int ra = LUAU_INSN_A(insn);
+            int kb = LUAU_INSN_D(insn);
+            auto idk = proto->k[kb];
+
+            break;
+        }
+        case LOP_RETURN:
+        {
+            int nresults = LUAU_INSN_B(insn) - 1;
+        }
+        default:
+        {
+
+            break;
+        }
+        }
+    }
+}
+
+
 
 
 int main() {
-    auto name = "";
+    auto name = "D:\\Dokumente\\Rojo\\AnimationClipEditor\\src\\Src\\Components\\AnimationClipEditorPlugin.luac";
 
     std::optional<std::string> source = readFile(name);
 
@@ -41,10 +98,24 @@ int main() {
 
     luau_load(L, name, bytecode.data(), bytecode.size(), 0);
 
-    
-    Luau::BytecodeBuilder bcb;
+    CODEGEN_ASSERT(lua_isLfunction(L, -1));
+    const TValue* func = luaA_toobject(L, -1);
 
+    Proto* root = clvalue(func)->l.p;
+
+    std::vector<Proto*> protos;
+    Luau::CodeGen::gatherFunctions(protos, root, Luau::CodeGen::CodeGen_ColdFunctions);
     
+    
+
+    BytecodeParser bytecodeParser;
+
+    for (size_t i = 0; i < protos.size(); i++)
+    {
+        Proto* proto = protos[i];
+
+        bytecodeParser.parseProto(proto);
+    }
    
 
     return 0;
