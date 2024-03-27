@@ -546,3 +546,13 @@ if(TARGET Luau.Bytecode.CLI)
         CLI/Flags.cpp
         CLI/Bytecode.cpp)
 endif()
+
+if(TARGET Luau.BytecodeParser.CLI)
+    # Luau.BytecodeParser.CLI Sources
+    target_sources(Luau.BytecodeParser.CLI PRIVATE
+        CLI/FileUtils.h
+        CLI/FileUtils.cpp
+        CLI/Flags.h
+        CLI/Flags.cpp
+        CLI/BytecodeParser.cpp)
+endif()

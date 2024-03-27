@@ -38,6 +38,7 @@ if(LUAU_BUILD_CLI)
     add_executable(Luau.Reduce.CLI)
     add_executable(Luau.Compile.CLI)
     add_executable(Luau.Bytecode.CLI)
+    add_executable(Luau.BytecodeParser.CLI)
 
     # This also adds target `name` on Linux/macOS and `name.exe` on Windows
     set_target_properties(Luau.Repl.CLI PROPERTIES OUTPUT_NAME luau)
@@ -46,6 +47,7 @@ if(LUAU_BUILD_CLI)
     set_target_properties(Luau.Reduce.CLI PROPERTIES OUTPUT_NAME luau-reduce)
     set_target_properties(Luau.Compile.CLI PROPERTIES OUTPUT_NAME luau-compile)
     set_target_properties(Luau.Bytecode.CLI PROPERTIES OUTPUT_NAME luau-bytecode)
+    set_target_properties(Luau.BytecodeParser.CLI PROPERTIES OUTPUT_NAME luau-bytecode_parser)
 endif()
 
 if(LUAU_BUILD_TESTS)
@@ -190,6 +192,7 @@ if(LUAU_BUILD_CLI)
     target_compile_options(Luau.Ast.CLI PRIVATE ${LUAU_OPTIONS})
     target_compile_options(Luau.Compile.CLI PRIVATE ${LUAU_OPTIONS})
     target_compile_options(Luau.Bytecode.CLI PRIVATE ${LUAU_OPTIONS})
+    target_compile_options(Luau.BytecodeParser.CLI PRIVATE ${LUAU_OPTIONS})
 
     target_include_directories(Luau.Repl.CLI PRIVATE extern extern/isocline/include)
 
@@ -214,6 +217,11 @@ if(LUAU_BUILD_CLI)
     target_link_libraries(Luau.Compile.CLI PRIVATE Luau.Compiler Luau.VM Luau.CodeGen)
 
     target_link_libraries(Luau.Bytecode.CLI PRIVATE Luau.Compiler Luau.VM Luau.CodeGen)
+
+
+    target_include_directories(Luau.BytecodeParser.CLI PUBLIC VM/include)
+    target_include_directories(Luau.BytecodeParser.CLI PUBLIC VM/src)
+    target_link_libraries(Luau.BytecodeParser.CLI PUBLIC Luau.Compiler Luau.VM Luau.CodeGen Luau.Common)
 endif()
 
 if(LUAU_BUILD_TESTS)
