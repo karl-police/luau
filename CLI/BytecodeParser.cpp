@@ -53,7 +53,7 @@ void BytecodeParser::parseProto(Proto* proto)
         {
         case LOP_LOADNIL:
         {
-            bcb.addConstantNil();
+            
             break;
         }
         case LOP_LOADK:
