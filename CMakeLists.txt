@@ -221,6 +221,7 @@ if(LUAU_BUILD_CLI)
 
     target_include_directories(Luau.BytecodeParser.CLI PUBLIC VM/include)
     target_include_directories(Luau.BytecodeParser.CLI PUBLIC VM/src)
+    target_include_directories(Luau.BytecodeParser.CLI PUBLIC CodeGen/include CodeGen/src)
     target_link_libraries(Luau.BytecodeParser.CLI PUBLIC Luau.Compiler Luau.VM Luau.CodeGen Luau.Common)
 endif()
 
