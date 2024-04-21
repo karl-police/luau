@@ -391,6 +391,10 @@ static bool compileFile(const char* name, CompileFormat format, Luau::CodeGen::A
 
             FILE* file = fopen(outputFileName.c_str(), "w");
 
+            #ifdef _WIN32
+                _setmode(_fileno(file), _O_BINARY);
+            #endif
+
             fwrite(bcb.getBytecode().data(), 1, bcb.getBytecode().size(), file);
 
             fclose(file);
