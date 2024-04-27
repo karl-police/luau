@@ -17,6 +17,7 @@ LUAU_FASTFLAG(LuauTraceTypesInNonstrictMode2)
 LUAU_FASTFLAG(LuauSetMetatableDoesNotTimeTravel)
 LUAU_FASTFLAG(LuauAutocompleteStringLiteralBounds);
 LUAU_FASTFLAG(LuauAutocompleteTableKeysNoInitialCharacter)
+LUAU_FASTFLAG(DebugLuauLogSolver)
 
 using namespace Luau;
 
@@ -159,6 +160,39 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK(ac.entryMap.count("table"));
     CHECK(ac.entryMap.count("math"));
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
+}
+
+
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk2")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::DebugLuauDeferredConstraintResolution, true},
+        {FFlag::DebugLuauLogSolver, true},
+    };
+
+    auto check1 = check(R"(
+local name = {}
+name.__index = name
+
+function name.new(abc)
+	local obj = setmetatable({}, name)
+	obj.a = abc
+	
+	return obj
+end
+
+
+function name:test()
+	self.b = "no"
+end
+
+
+local newClass = name.new("e")
+newClass:@1
+)");
+
+    auto ac1 = autocomplete('1');
+    CHECK(ac1.entryMap.count("test"));
 }
 
 
