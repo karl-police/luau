@@ -14,10 +14,12 @@
 #include "Luau/Scope.h"
 #include "Luau/StringUtils.h"
 #include "Luau/TimeTrace.h"
+#include "Luau/TypeArena.h"
 #include "Luau/TypeChecker2.h"
 #include "Luau/NonStrictTypeChecker.h"
 #include "Luau/TypeInfer.h"
 #include "Luau/Variant.h"
+#include "Luau/VisitType.h"
 
 #include <algorithm>
 #include <chrono>
@@ -35,6 +37,9 @@ LUAU_FASTFLAGVARIABLE(LuauKnowsTheDataModel3, false)
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJson, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode, false)
 
 namespace Luau
 {
@@ -888,7 +893,13 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
     SourceNode& sourceNode = *item.sourceNode;
     const SourceModule& sourceModule = *item.sourceModule;
     const Config& config = item.config;
-    Mode mode = sourceModule.mode.value_or(config.mode);
+    Mode mode;
+    if (FFlag::DebugLuauForceStrictMode)
+        mode = Mode::Strict;
+    else if (FFlag::DebugLuauForceNonStrictMode)
+        mode = Mode::Nonstrict;
+    else
+        mode = sourceModule.mode.value_or(config.mode);
     ScopePtr environmentScope = item.environmentScope;
     double timestamp = getTimestamp();
     const std::vector<RequireCycle>& requireCycles = item.requireCycles;
@@ -1160,6 +1171,56 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
         std::move(prepareModuleScope), options, limits, recordJsonLog, writeJsonLog);
 }
 
+struct InternalTypeFinder : TypeOnceVisitor
+{
+    bool visit(TypeId, const ClassType&) override
+    {
+        return false;
+    }
+
+    bool visit(TypeId, const BlockedType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypeId, const FreeType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypeId, const PendingExpansionType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypeId, const LocalType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypePackId, const BlockedTypePack&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypePackId, const FreeTypePack&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypePackId, const TypeFamilyInstanceTypePack&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+};
+
 ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<RequireCycle>& requireCycles, NotNull<BuiltinTypes> builtinTypes,
     NotNull<InternalErrorReporter> iceHandler, NotNull<ModuleResolver> moduleResolver, NotNull<FileResolver> fileResolver,
     const ScopePtr& parentScope, std::function<void(const ModuleName&, const ScopePtr&)> prepareModuleScope, FrontendOptions options,
@@ -1201,8 +1262,8 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
     cg.visitModuleRoot(sourceModule.root);
     result->errors = std::move(cg.errors);
 
-    ConstraintSolver cs{NotNull{&normalizer}, NotNull(cg.rootScope), borrowConstraints(cg.constraints), result->name, moduleResolver,
-        requireCycles, logger.get(), limits};
+    ConstraintSolver cs{NotNull{&normalizer}, NotNull(cg.rootScope), borrowConstraints(cg.constraints), result->name, moduleResolver, requireCycles,
+        logger.get(), limits};
 
     if (options.randomizeConstraintResolutionSeed)
         cs.randomize(*options.randomizeConstraintResolutionSeed);
@@ -1236,8 +1297,6 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
     result->type = sourceModule.type;
     result->upperBoundContributors = std::move(cs.upperBoundContributors);
 
-    result->clonePublicInterface(builtinTypes, *iceHandler);
-
     if (result->timeout || result->cancelled)
     {
         // If solver was interrupted, skip typechecking and replace all module results with error-supressing types to avoid leaking blocked/pending
@@ -1257,6 +1316,37 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
             Luau::checkNonStrict(builtinTypes, iceHandler, NotNull{&unifierState}, NotNull{&dfg}, NotNull{&limits}, sourceModule, result.get());
         else
             Luau::check(builtinTypes, NotNull{&unifierState}, NotNull{&limits}, logger.get(), sourceModule, result.get());
+    }
+
+    unfreeze(result->interfaceTypes);
+    result->clonePublicInterface(builtinTypes, *iceHandler);
+
+    if (FFlag::DebugLuauForbidInternalTypes)
+    {
+        InternalTypeFinder finder;
+
+        finder.traverse(result->returnType);
+
+        for (const auto& [_, binding] : result->exportedTypeBindings)
+            finder.traverse(binding.type);
+
+        for (const auto& [_, ty] : result->astTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, ty] : result->astExpectedTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, tp] : result->astTypePacks)
+            finder.traverse(tp);
+
+        for (const auto& [_, ty] : result->astResolvedTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, ty] : result->astOverloadResolvedTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, tp] : result->astResolvedTypePacks)
+            finder.traverse(tp);
     }
 
     // It would be nice if we could freeze the arenas before doing type
@@ -1295,9 +1385,8 @@ ModulePtr Frontend::check(const SourceModule& sourceModule, Mode mode, std::vect
         }
         catch (const InternalCompilerError& err)
         {
-            InternalCompilerError augmented = err.location.has_value()
-                                                  ? InternalCompilerError{err.message, sourceModule.name, *err.location}
-                                                  : InternalCompilerError{err.message, sourceModule.name};
+            InternalCompilerError augmented = err.location.has_value() ? InternalCompilerError{err.message, sourceModule.name, *err.location}
+                                                                       : InternalCompilerError{err.message, sourceModule.name};
             throw augmented;
         }
     }

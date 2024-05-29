@@ -9,6 +9,7 @@
 #include "Luau/RecursionCounter.h"
 #include "Luau/StringUtils.h"
 #include "Luau/ToString.h"
+#include "Luau/TypeFamily.h"
 #include "Luau/TypeInfer.h"
 #include "Luau/TypePack.h"
 #include "Luau/VecDeque.h"
@@ -422,6 +423,9 @@ bool maybeSingleton(TypeId ty)
         for (TypeId part : itv)
             if (maybeSingleton(part)) // will i regret this?
                 return true;
+    if (const TypeFamilyInstanceType* tfit = get<TypeFamilyInstanceType>(ty))
+        if (tfit->family->name == "keyof" || tfit->family->name == "rawkeyof")
+            return true;
     return false;
 }
 
@@ -540,6 +544,21 @@ GenericType::GenericType(Scope* scope, const Name& name)
 BlockedType::BlockedType()
     : index(Unifiable::freshIndex())
 {
+}
+
+Constraint* BlockedType::getOwner() const
+{
+    return owner;
+}
+
+void BlockedType::setOwner(Constraint* newOwner)
+{
+    LUAU_ASSERT(owner == nullptr);
+
+    if (owner != nullptr)
+        return;
+
+    owner = newOwner;
 }
 
 PendingExpansionType::PendingExpansionType(
@@ -684,6 +703,12 @@ void Property::setType(TypeId ty)
     readTy = ty;
     if (FFlag::DebugLuauDeferredConstraintResolution)
         writeTy = ty;
+}
+
+void Property::makeShared()
+{
+    if (writeTy)
+        writeTy = readTy;
 }
 
 bool Property::isShared() const
@@ -1297,6 +1322,13 @@ bool GenericTypeDefinition::operator==(const GenericTypeDefinition& rhs) const
 bool GenericTypePackDefinition::operator==(const GenericTypePackDefinition& rhs) const
 {
     return tp == rhs.tp && defaultValue == rhs.defaultValue;
+}
+
+template<>
+LUAU_NOINLINE Unifiable::Bound<TypeId>* emplaceType<BoundType>(Type* ty, TypeId& tyArg)
+{
+    LUAU_ASSERT(ty != follow(tyArg));
+    return &ty->ty.emplace<BoundType>(tyArg);
 }
 
 } // namespace Luau

@@ -13,6 +13,7 @@
 
 LUAU_FASTINT(LuauTypeReductionRecursionLimit)
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
+LUAU_DYNAMIC_FASTINTVARIABLE(LuauSimplificationComplexityLimit, 8);
 
 namespace Luau
 {
@@ -237,16 +238,12 @@ Relation relateTables(TypeId left, TypeId right, SimplifierSeenSet& seen)
     LUAU_ASSERT(1 == rightTable->props.size());
     // Disjoint props have nothing in common
     // t1 with props p1's cannot appear in t2 and t2 with props p2's cannot appear in t1
-    bool foundPropFromLeftInRight = std::any_of(begin(leftTable->props), end(leftTable->props),
-        [&](auto prop)
-        {
-            return rightTable->props.count(prop.first) > 0;
-        });
-    bool foundPropFromRightInLeft = std::any_of(begin(rightTable->props), end(rightTable->props),
-        [&](auto prop)
-        {
-            return leftTable->props.count(prop.first) > 0;
-        });
+    bool foundPropFromLeftInRight = std::any_of(begin(leftTable->props), end(leftTable->props), [&](auto prop) {
+        return rightTable->props.count(prop.first) > 0;
+    });
+    bool foundPropFromRightInLeft = std::any_of(begin(rightTable->props), end(rightTable->props), [&](auto prop) {
+        return leftTable->props.count(prop.first) > 0;
+    });
 
     if (!foundPropFromLeftInRight && !foundPropFromRightInLeft && leftTable->props.size() >= 1 && rightTable->props.size() >= 1)
         return Relation::Disjoint;
@@ -380,8 +377,12 @@ Relation relate(TypeId left, TypeId right, SimplifierSeenSet& seen)
     {
         std::vector<Relation> opts;
         for (TypeId part : ut)
-            if (relate(left, part, seen) == Relation::Subset)
+        {
+            Relation r = relate(left, part, seen);
+
+            if (r == Relation::Subset || r == Relation::Coincident)
                 return Relation::Subset;
+        }
         return Relation::Intersects;
     }
 
@@ -689,6 +690,9 @@ TypeId TypeSimplifier::intersectUnionWithType(TypeId left, TypeId right)
     bool changed = false;
     std::set<TypeId> newParts;
 
+    if (leftUnion->options.size() > (size_t)DFInt::LuauSimplificationComplexityLimit)
+        return arena->addType(IntersectionType{{left, right}});
+
     for (TypeId part : leftUnion)
     {
         TypeId simplified = intersect(right, part);
@@ -722,6 +726,15 @@ TypeId TypeSimplifier::intersectUnions(TypeId left, TypeId right)
     LUAU_ASSERT(rightUnion);
 
     std::set<TypeId> newParts;
+
+    // Combinatorial blowup moment!!
+
+    // combination size
+    size_t optionSize = (int)leftUnion->options.size() * rightUnion->options.size();
+    size_t maxSize = DFInt::LuauSimplificationComplexityLimit;
+
+    if (optionSize > maxSize)
+        return arena->addType(IntersectionType{{left, right}});
 
     for (TypeId leftPart : leftUnion)
     {
@@ -986,6 +999,9 @@ TypeId TypeSimplifier::intersectIntersectionWithType(TypeId left, TypeId right)
     const IntersectionType* leftIntersection = get<IntersectionType>(left);
     LUAU_ASSERT(leftIntersection);
 
+    if (leftIntersection->parts.size() > (size_t)DFInt::LuauSimplificationComplexityLimit)
+        return arena->addType(IntersectionType{{left, right}});
+
     bool changed = false;
     std::set<TypeId> newParts;
 
@@ -1135,6 +1151,10 @@ TypeId TypeSimplifier::intersect(TypeId left, TypeId right)
         return right;
     if (get<AnyType>(right) && get<ErrorType>(left))
         return left;
+    if (get<UnknownType>(left) && !get<ErrorType>(right))
+        return right;
+    if (get<UnknownType>(right) && !get<ErrorType>(left))
+        return left;
     if (get<AnyType>(left))
         return arena->addType(UnionType{{right, builtinTypes->errorType}});
     if (get<AnyType>(right))
@@ -1235,6 +1255,10 @@ TypeId TypeSimplifier::union_(TypeId left, TypeId right)
             case Relation::Coincident:
             case Relation::Superset:
                 return left;
+            case Relation::Subset:
+                newParts.insert(right);
+                changed = true;
+                break;
             default:
                 newParts.insert(part);
                 newParts.insert(right);
@@ -1245,9 +1269,15 @@ TypeId TypeSimplifier::union_(TypeId left, TypeId right)
 
         if (!changed)
             return left;
-        if (1 == newParts.size())
+        if (0 == newParts.size())
+        {
+            // If the left-side is changed but has no parts, then the left-side union is uninhabited.
+            return right;
+        }
+        else if (1 == newParts.size())
             return *begin(newParts);
-        return arena->addType(UnionType{std::vector<TypeId>{begin(newParts), end(newParts)}});
+        else
+            return arena->addType(UnionType{std::vector<TypeId>{begin(newParts), end(newParts)}});
     }
     else if (get<UnionType>(right))
         return union_(right, left);

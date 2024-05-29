@@ -15,8 +15,6 @@
 
 using namespace Luau;
 
-LUAU_FASTFLAG(LuauCheckedFunctionSyntax);
-
 #define NONSTRICT_REQUIRE_ERR_AT_POS(pos, result, idx) \
     do \
     { \
@@ -63,17 +61,27 @@ struct NonStrictTypeCheckerFixture : Fixture
     NonStrictTypeCheckerFixture()
     {
         registerHiddenTypes(&frontend);
+        registerTestTypes();
     }
 
     CheckResult checkNonStrict(const std::string& code)
     {
         ScopedFastFlag flags[] = {
-            {FFlag::LuauCheckedFunctionSyntax, true},
             {FFlag::DebugLuauDeferredConstraintResolution, true},
         };
         LoadDefinitionFileResult res = loadDefinition(definitions);
         LUAU_ASSERT(res.success);
         return check(Mode::Nonstrict, code);
+    }
+
+    CheckResult checkNonStrictModule(const std::string& moduleName)
+    {
+        ScopedFastFlag flags[] = {
+            {FFlag::DebugLuauDeferredConstraintResolution, true},
+        };
+        LoadDefinitionFileResult res = loadDefinition(definitions);
+        LUAU_ASSERT(res.success);
+        return frontend.check(moduleName);
     }
 
     std::string definitions = R"BUILTIN_SRC(
@@ -92,6 +100,22 @@ declare foo: {
 
 declare function @checked optionalArgsAtTheEnd1(x: string, y: number?, z: number?) : number
 declare function @checked optionalArgsAtTheEnd2(x: string, y: number?, z: string) : number
+
+type DateTypeArg = {
+    year: number,
+    month: number,
+    day: number,
+    hour: number?,
+    min: number?,
+    sec: number?,
+    isdst: boolean?,
+}
+
+declare os : {
+    time: @checked (time: DateTypeArg?) -> number
+}
+
+declare function @checked require(target : any) : any
 )BUILTIN_SRC";
 };
 
@@ -503,6 +527,33 @@ optionalArgsAtTheEnd2("a", "b", "c") -- error
     LUAU_ASSERT(r1);
     CHECK_EQ(3, r1->expected);
     CHECK_EQ(2, r1->actual);
+}
+
+TEST_CASE_FIXTURE(NonStrictTypeCheckerFixture, "non_testable_type_throws_ice")
+{
+    CHECK_THROWS_AS(checkNonStrict(R"(
+os.time({year = 0, month = 0, day = 0, min = 0, isdst = nil})
+)"),
+        Luau::InternalCompilerError);
+}
+
+TEST_CASE_FIXTURE(NonStrictTypeCheckerFixture, "non_strict_shouldnt_warn_on_require_module")
+{
+    fileResolver.source["Modules/A"] = R"(
+--!strict
+type t = {x : number}
+local e : t = {x = 3}
+return e
+)";
+    fileResolver.sourceTypes["Modules/A"] = SourceCode::Module;
+
+    fileResolver.source["Modules/B"] = R"(
+--!nonstrict
+local E = require(script.Parent.A)
+)";
+
+    CheckResult result = checkNonStrictModule("Modules/B");
+    LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_SUITE_END();

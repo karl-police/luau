@@ -12,12 +12,15 @@
 #include "Luau/RecursionCounter.h"
 #include "Luau/Refinement.h"
 #include "Luau/Scope.h"
-#include "Luau/TypeUtils.h"
+#include "Luau/Simplify.h"
+#include "Luau/StringUtils.h"
+#include "Luau/TableLiteralInference.h"
 #include "Luau/Type.h"
 #include "Luau/TypeFamily.h"
-#include "Luau/Simplify.h"
+#include "Luau/TypePack.h"
+#include "Luau/TypeUtils.h"
+#include "Luau/Unifier2.h"
 #include "Luau/VisitType.h"
-#include "Luau/InsertionOrderedMap.h"
 
 #include <algorithm>
 #include <memory>
@@ -25,7 +28,6 @@
 LUAU_FASTINT(LuauCheckRecursionLimit);
 LUAU_FASTFLAG(DebugLuauLogSolverToJson);
 LUAU_FASTFLAG(DebugLuauMagicTypes);
-LUAU_FASTFLAG(LuauLoopControlFlowAnalysis);
 
 namespace Luau
 {
@@ -230,7 +232,10 @@ void ConstraintGenerator::visitModuleRoot(AstStatBlock* block)
 
     Checkpoint end = checkpoint(this);
 
-    NotNull<Constraint> genConstraint = addConstraint(scope, block->location, GeneralizationConstraint{arena->addType(BlockedType{}), moduleFnTy, std::move(interiorTypes.back())});
+    TypeId result = arena->addType(BlockedType{});
+    NotNull<Constraint> genConstraint =
+        addConstraint(scope, block->location, GeneralizationConstraint{result, moduleFnTy, std::move(interiorTypes.back())});
+    getMutable<BlockedType>(result)->setOwner(genConstraint);
     forEachConstraint(start, end, this, [genConstraint](const ConstraintPtr& c) {
         genConstraint->dependencies.push_back(NotNull{c.get()});
     });
@@ -282,7 +287,7 @@ ScopePtr ConstraintGenerator::childScope(AstNode* node, const ScopePtr& parent)
     return scope;
 }
 
-std::optional<TypeId> ConstraintGenerator::lookup(const ScopePtr& scope, DefId def, bool prototype)
+std::optional<TypeId> ConstraintGenerator::lookup(const ScopePtr& scope, Location location, DefId def, bool prototype)
 {
     if (get<Cell>(def))
         return scope->lookup(def);
@@ -291,7 +296,7 @@ std::optional<TypeId> ConstraintGenerator::lookup(const ScopePtr& scope, DefId d
         if (auto found = scope->lookup(def))
             return *found;
         else if (!prototype && phi->operands.size() == 1)
-            return lookup(scope, phi->operands.at(0), prototype);
+            return lookup(scope, location, phi->operands.at(0), prototype);
         else if (!prototype)
             return std::nullopt;
 
@@ -302,14 +307,14 @@ std::optional<TypeId> ConstraintGenerator::lookup(const ScopePtr& scope, DefId d
             // `scope->lookup(operand)` may return nothing because we only bind a type to that operand
             // once we've seen that particular `DefId`. In this case, we need to prototype those types
             // and use those at a later time.
-            std::optional<TypeId> ty = lookup(scope, operand, /*prototype*/ false);
+            std::optional<TypeId> ty = lookup(scope, location, operand, /*prototype*/ false);
             if (!ty)
             {
                 ty = arena->addType(BlockedType{});
                 rootScope->lvalueTypes[operand] = *ty;
             }
 
-            res = makeUnion(scope, Location{} /* TODO: can we provide a real location here? */, res, *ty);
+            res = makeUnion(scope, location, res, *ty);
         }
 
         scope->lvalueTypes[def] = res;
@@ -403,13 +408,13 @@ void ConstraintGenerator::computeRefinement(const ScopePtr& scope, Location loca
     else if (auto proposition = get<Proposition>(refinement))
     {
         TypeId discriminantTy = proposition->discriminantTy;
-        if (!sense && !eq)
-            discriminantTy = arena->addType(NegationType{proposition->discriminantTy});
-        else if (eq)
-        {
-            discriminantTy = arena->addType(BlockedType{});
-            constraints->push_back(SingletonOrTopTypeConstraint{discriminantTy, proposition->discriminantTy, !sense});
-        }
+
+        // if we have a negative sense, then we need to negate the discriminant
+        if (!sense)
+            discriminantTy = arena->addType(NegationType{discriminantTy});
+
+        if (eq)
+            discriminantTy = createTypeFamilyInstance(kBuiltinTypeFamilies.singletonFamily, {discriminantTy}, {}, scope, location);
 
         for (const RefinementKey* key = proposition->key; key; key = key->parent)
         {
@@ -422,7 +427,11 @@ void ConstraintGenerator::computeRefinement(const ScopePtr& scope, Location loca
 
             TypeId nextDiscriminantTy = arena->addType(TableType{});
             NotNull<TableType> table{getMutable<TableType>(nextDiscriminantTy)};
-            table->props[*key->propName] = Property::readonly(discriminantTy);
+            // When we fully support read-write properties (i.e. when we allow properties with
+            // completely disparate read and write types), then the following property can be
+            // set to read-only since refinements only tell us about what we read. This cannot
+            // be allowed yet though because it causes read and write types to diverge.
+            table->props[*key->propName] = Property::rw(discriminantTy);
             table->scope = scope.get();
             table->state = TableState::Sealed;
 
@@ -503,7 +512,7 @@ void ConstraintGenerator::applyRefinements(const ScopePtr& scope, Location locat
 
     for (auto& [def, partition] : refinements)
     {
-        if (std::optional<TypeId> defTy = lookup(scope, def))
+        if (std::optional<TypeId> defTy = lookup(scope, location, def))
         {
             TypeId ty = *defTy;
             if (partition.shouldAppendNilType)
@@ -517,12 +526,7 @@ void ConstraintGenerator::applyRefinements(const ScopePtr& scope, Location locat
             {
                 if (mustDeferIntersection(ty) || mustDeferIntersection(dt))
                 {
-                    TypeId resultType = arena->addType(TypeFamilyInstanceType{
-                        NotNull{&kBuiltinTypeFamilies.refineFamily},
-                        {ty, dt},
-                        {},
-                    });
-                    addConstraint(scope, location, ReduceConstraint{resultType});
+                    TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.refineFamily, {ty, dt}, {}, scope, location);
 
                     ty = resultType;
                 }
@@ -634,9 +638,9 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
     else if (auto s = stat->as<AstStatRepeat>())
         return visit(scope, s);
     else if (stat->is<AstStatBreak>())
-        return FFlag::LuauLoopControlFlowAnalysis ? ControlFlow::Breaks : ControlFlow::None;
+        return ControlFlow::Breaks;
     else if (stat->is<AstStatContinue>())
-        return FFlag::LuauLoopControlFlowAnalysis ? ControlFlow::Continues : ControlFlow::None;
+        return ControlFlow::Continues;
     else if (auto r = stat->as<AstStatReturn>())
         return visit(scope, r);
     else if (auto e = stat->as<AstStatExpr>())
@@ -731,14 +735,18 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatLocal* stat
         scope->lvalueTypes[def] = assignee;
     }
 
-    TypePackId resultPack = checkPack(scope, statLocal->values, expectedTypes).tp;
-    addConstraint(scope, statLocal->location, UnpackConstraint{arena->addTypePack(std::move(assignees)), resultPack, /*resultIsLValue*/ true});
+    TypePackId rvaluePack = checkPack(scope, statLocal->values, expectedTypes).tp;
 
-    // Types must flow between whatever annotations were provided and the rhs expression.
     if (hasAnnotation)
-        addConstraint(scope, statLocal->location, PackSubtypeConstraint{resultPack, arena->addTypePack(std::move(annotatedTypes))});
+    {
+        TypePackId annotatedPack = arena->addTypePack(std::move(annotatedTypes));
+        addConstraint(scope, statLocal->location, UnpackConstraint{arena->addTypePack(std::move(assignees)), annotatedPack, /*resultIsLValue*/ true});
+        addConstraint(scope, statLocal->location, PackSubtypeConstraint{rvaluePack, annotatedPack});
+    }
+    else
+        addConstraint(scope, statLocal->location, UnpackConstraint{arena->addTypePack(std::move(assignees)), rvaluePack, /*resultIsLValue*/ true});
 
-    if (statLocal->vars.size == 1 && statLocal->values.size == 1 && firstValueType && scope.get() == rootScope)
+    if (statLocal->vars.size == 1 && statLocal->values.size == 1 && firstValueType && scope.get() == rootScope && !hasAnnotation)
     {
         AstLocal* var = statLocal->vars.data[0];
         AstExpr* value = statLocal->values.data[0];
@@ -904,7 +912,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatLocalFuncti
 
     bool sigFullyDefined = !hasFreeType(sig.signature);
     if (sigFullyDefined)
-        asMutable(functionType)->ty.emplace<BoundType>(sig.signature);
+        emplaceType<BoundType>(asMutable(functionType), sig.signature);
 
     DefId def = dfg->getDef(function->name);
     scope->lvalueTypes[def] = functionType;
@@ -935,7 +943,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatLocalFuncti
             }
         });
 
-        addConstraint(scope, std::move(c));
+        getMutable<BlockedType>(functionType)->setOwner(addConstraint(scope, std::move(c)));
         module->astTypes[function->func] = functionType;
     }
     else
@@ -950,21 +958,20 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFunction* f
     // With or without self
 
     TypeId generalizedType = arena->addType(BlockedType{});
-
     Checkpoint start = checkpoint(this);
     FunctionSignature sig = checkFunctionSignature(scope, function->func, /* expectedType */ std::nullopt, function->name->location);
     bool sigFullyDefined = !hasFreeType(sig.signature);
 
     if (sigFullyDefined)
-        asMutable(generalizedType)->ty.emplace<BoundType>(sig.signature);
+        emplaceType<BoundType>(asMutable(generalizedType), sig.signature);
 
     DenseHashSet<Constraint*> excludeList{nullptr};
 
     DefId def = dfg->getDef(function->name);
-    std::optional<TypeId> existingFunctionTy = lookup(scope, def);
+    std::optional<TypeId> existingFunctionTy = follow(lookup(scope, function->name->location, def));
 
-    if (existingFunctionTy && (sigFullyDefined || function->name->is<AstExprLocal>()) && get<BlockedType>(*existingFunctionTy))
-        asMutable(*existingFunctionTy)->ty.emplace<BoundType>(sig.signature);
+    if (get<BlockedType>(existingFunctionTy) && sigFullyDefined)
+        emplaceType<BoundType>(asMutable(*existingFunctionTy), sig.signature);
 
     if (AstExprLocal* localName = function->name->as<AstExprLocal>())
     {
@@ -978,9 +985,9 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFunction* f
         else
             scope->bindings[localName->local] = Binding{generalizedType, localName->location};
 
-        sig.bodyScope->bindings[localName->local] = Binding{sig.signature, localName->location};
-        sig.bodyScope->lvalueTypes[def] = sig.signature;
-        sig.bodyScope->rvalueRefinements[def] = sig.signature;
+        scope->bindings[localName->local] = Binding{sig.signature, localName->location};
+        scope->lvalueTypes[def] = sig.signature;
+        scope->rvalueRefinements[def] = sig.signature;
     }
     else if (AstExprGlobal* globalName = function->name->as<AstExprGlobal>())
     {
@@ -990,15 +997,14 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFunction* f
         if (!sigFullyDefined)
             generalizedType = *existingFunctionTy;
 
-        sig.bodyScope->bindings[globalName->name] = Binding{sig.signature, globalName->location};
-        sig.bodyScope->lvalueTypes[def] = sig.signature;
-        sig.bodyScope->rvalueRefinements[def] = sig.signature;
+        scope->bindings[globalName->name] = Binding{sig.signature, globalName->location};
+        scope->lvalueTypes[def] = sig.signature;
+        scope->rvalueRefinements[def] = sig.signature;
     }
     else if (AstExprIndexName* indexName = function->name->as<AstExprIndexName>())
     {
         Checkpoint check1 = checkpoint(this);
-        std::optional<TypeId> lvalueType = checkLValue(scope, indexName, generalizedType);
-        LUAU_ASSERT(lvalueType);
+        auto [_, lvalueType] = checkLValue(scope, indexName);
         Checkpoint check2 = checkpoint(this);
 
         forEachConstraint(check1, check2, this, [&excludeList](const ConstraintPtr& c) {
@@ -1009,7 +1015,8 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFunction* f
 
         if (lvalueType && *lvalueType != generalizedType)
         {
-            addConstraint(scope, indexName->location, SubtypeConstraint{*lvalueType, generalizedType});
+            LUAU_ASSERT(get<BlockedType>(lvalueType));
+            emplaceType<BoundType>(asMutable(*lvalueType), generalizedType);
         }
     }
     else if (AstExprError* err = function->name->as<AstExprError>())
@@ -1045,7 +1052,23 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFunction* f
             }
         });
 
-        addConstraint(scope, std::move(c));
+
+        // We need to check if the blocked type has no owner here because
+        // if a function is defined twice anywhere in the program like:
+        // `function f() end` and then later like `function f() end`
+        // Then there will be exactly one definition in the scope for it because it's a global
+        // (this is the same as writing f = function() end)
+        // Therefore, when we visit() the multiple different expression of this global variable
+        // They will all be aliased to the same blocked type, which means we can create multiple constraints
+        // for the same blocked type.
+        if (auto blocked = getMutable<BlockedType>(generalizedType); blocked && !blocked->getOwner())
+            blocked->setOwner(addConstraint(scope, std::move(c)));
+    }
+
+    if (BlockedType* bt = getMutable<BlockedType>(follow(existingFunctionTy)); bt && !bt->getOwner())
+    {
+        auto uc = addConstraint(scope, function->name->location, Unpack1Constraint{*existingFunctionTy, generalizedType});
+        bt->setOwner(uc);
     }
 
     return ControlFlow::None;
@@ -1090,72 +1113,50 @@ static void bindFreeType(TypeId a, TypeId b)
     LUAU_ASSERT(af || bf);
 
     if (!bf)
-        asMutable(a)->ty.emplace<BoundType>(b);
+        emplaceType<BoundType>(asMutable(a), b);
     else if (!af)
-        asMutable(b)->ty.emplace<BoundType>(a);
+        emplaceType<BoundType>(asMutable(b), a);
     else if (subsumes(bf->scope, af->scope))
-        asMutable(a)->ty.emplace<BoundType>(b);
+        emplaceType<BoundType>(asMutable(a), b);
     else if (subsumes(af->scope, bf->scope))
-        asMutable(b)->ty.emplace<BoundType>(a);
+        emplaceType<BoundType>(asMutable(b), a);
 }
 
 ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatAssign* assign)
 {
-    std::vector<TypeId> assignees;
-    assignees.reserve(assign->vars.size);
+    std::vector<TypeId> upperBounds;
+    upperBounds.reserve(assign->vars.size);
 
-    size_t i = 0;
+    std::vector<TypeId> typeStates;
+    typeStates.reserve(assign->vars.size);
+
+    Checkpoint lvalueBeginCheckpoint = checkpoint(this);
+
     for (AstExpr* lvalue : assign->vars)
     {
-        TypeId assignee = arena->addType(BlockedType{});
-
-        // This is a really weird thing to do, but it's critically important for some kinds of
-        // assignments with the current type state behavior. Consider this code:
-        // local function f(l, r)
-        //     local i = l
-        //     for _ = l, r do
-        //         i = i + 1
-        //     end
-        // end
-        //
-        // With type states now, we will not create a new state for `i` within the loop. This means
-        // that, in the absence of the analysis below, we would infer a too-broad bound for i: the
-        // cyclic type t1 where t1 = add<t1 | number, number>. In order to stop this, we say that
-        // assignments to a definition with a self-referential binary expression do not transform
-        // the type of the definition. This will only apply for loops, where the definition is
-        // shared in more places; for non-loops, there will be a separate DefId for the lvalue in
-        // the assignment, so we will deem the expression to be transformative.
-        //
-        // Deeming the addition in the code sample above as non-transformative means that i is known
-        // to be exactly number further on, ensuring the type family reduces down to number, as is
-        // expected for this code snippet.
-        //
-        // There is a potential for spurious errors here if the expression is more complex than a
-        // simple binary expression, e.g. i = (i + 1) * 2. At the time of writing, this case hasn't
-        // materialized.
-        bool transform = true;
-
-        if (assign->values.size > i)
-        {
-            AstExpr* value = assign->values.data[i];
-            if (auto bexp = value->as<AstExprBinary>())
-            {
-                DefId lvalueDef = dfg->getDef(lvalue);
-                DefId lDef = dfg->getDef(bexp->left);
-                DefId rDef = dfg->getDef(bexp->right);
-
-                if (lvalueDef == lDef || lvalueDef == rDef)
-                    transform = false;
-            }
-        }
-
-        checkLValue(scope, lvalue, assignee, transform);
-        assignees.push_back(assignee);
-        ++i;
+        auto [upperBound, typeState] = checkLValue(scope, lvalue);
+        upperBounds.push_back(upperBound.value_or(builtinTypes->unknownType));
+        typeStates.push_back(typeState.value_or(builtinTypes->unknownType));
     }
 
+    Checkpoint lvalueEndCheckpoint = checkpoint(this);
+
     TypePackId resultPack = checkPack(scope, assign->values).tp;
-    addConstraint(scope, assign->location, UnpackConstraint{arena->addTypePack(std::move(assignees)), resultPack, /*resultIsLValue*/ true});
+    auto uc = addConstraint(scope, assign->location, UnpackConstraint{arena->addTypePack(typeStates), resultPack, /*resultIsLValue*/ true});
+    forEachConstraint(lvalueBeginCheckpoint, lvalueEndCheckpoint, this, [uc](const ConstraintPtr& constraint) {
+        uc->dependencies.push_back(NotNull{constraint.get()});
+    });
+
+    auto psc = addConstraint(scope, assign->location, PackSubtypeConstraint{resultPack, arena->addTypePack(std::move(upperBounds))});
+    psc->dependencies.push_back(uc);
+
+    for (TypeId assignee : typeStates)
+    {
+        auto blocked = getMutable<BlockedType>(assignee);
+
+        if (blocked && !blocked->getOwner())
+            blocked->setOwner(uc);
+    }
 
     return ControlFlow::None;
 }
@@ -1165,7 +1166,21 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatCompoundAss
     AstExprBinary binop = AstExprBinary{assign->location, assign->op, assign->var, assign->value};
     TypeId resultTy = check(scope, &binop).ty;
 
-    checkLValue(scope, assign->var, resultTy, true);
+    auto [upperBound, typeState] = checkLValue(scope, assign->var);
+
+    Constraint* sc = nullptr;
+    if (upperBound)
+        sc = addConstraint(scope, assign->location, SubtypeConstraint{resultTy, *upperBound});
+
+    if (typeState)
+    {
+        NotNull<Constraint> uc = addConstraint(scope, assign->location, Unpack1Constraint{*typeState, resultTy, /*resultIsLValue=*/true});
+        if (auto blocked = getMutable<BlockedType>(*typeState); blocked && !blocked->getOwner())
+            blocked->setOwner(uc);
+
+        if (sc)
+            uc->dependencies.push_back(NotNull{sc});
+    }
 
     DefId def = dfg->getDef(assign->var);
     scope->lvalueTypes[def] = resultTy;
@@ -1175,7 +1190,10 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatCompoundAss
 
 ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatIf* ifStatement)
 {
-    RefinementId refinement = check(scope, ifStatement->condition, std::nullopt).refinement;
+    RefinementId refinement = [&]() {
+        InConditionalContext flipper{&typeContext};
+        return check(scope, ifStatement->condition, std::nullopt).refinement;
+    }();
 
     ScopePtr thenScope = childScope(ifStatement->thenbody, scope);
     applyRefinements(thenScope, ifStatement->condition->location, refinement);
@@ -1198,31 +1216,12 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatIf* ifState
     if (elsecf == ControlFlow::None)
         scope->inheritAssignments(elseScope);
 
-    if (FFlag::LuauLoopControlFlowAnalysis && thencf == elsecf)
+    if (thencf == elsecf)
         return thencf;
     else if (matches(thencf, ControlFlow::Returns | ControlFlow::Throws) && matches(elsecf, ControlFlow::Returns | ControlFlow::Throws))
         return ControlFlow::Returns;
     else
         return ControlFlow::None;
-}
-
-static bool occursCheck(TypeId needle, TypeId haystack)
-{
-    LUAU_ASSERT(get<BlockedType>(needle));
-    haystack = follow(haystack);
-
-    auto checkHaystack = [needle](TypeId haystack) {
-        return occursCheck(needle, haystack);
-    };
-
-    if (needle == haystack)
-        return true;
-    else if (auto ut = get<UnionType>(haystack))
-        return std::any_of(begin(ut), end(ut), checkHaystack);
-    else if (auto it = get<IntersectionType>(haystack))
-        return std::any_of(begin(it), end(it), checkHaystack);
-
-    return false;
 }
 
 ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatTypeAlias* alias)
@@ -1250,18 +1249,17 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatTypeAlias* 
     if (bindingIt == typeBindings->end() || defnScope == nullptr)
         return ControlFlow::None;
 
-    TypeId ty = resolveType(*defnScope, alias->type, /* inTypeArguments */ false);
+    TypeId ty = resolveType(*defnScope, alias->type, /* inTypeArguments */ false, /* replaceErrorWithFresh */ false);
 
     TypeId aliasTy = bindingIt->second.type;
     LUAU_ASSERT(get<BlockedType>(aliasTy));
-
     if (occursCheck(aliasTy, ty))
     {
-        asMutable(aliasTy)->ty.emplace<BoundType>(builtinTypes->anyType);
+        emplaceType<BoundType>(asMutable(aliasTy), builtinTypes->anyType);
         reportError(alias->nameLocation, OccursCheckFailed{});
     }
     else
-        asMutable(aliasTy)->ty.emplace<BoundType>(ty);
+        emplaceType<BoundType>(asMutable(aliasTy), ty);
 
     std::vector<TypeId> typeParams;
     for (auto tyParam : createGenerics(*defnScope, alias->generics, /* useCache */ true, /* addTypes */ false))
@@ -1662,7 +1660,10 @@ InferencePack ConstraintGenerator::checkPack(const ScopePtr& scope, AstExprCall*
             unpackedTypes.emplace_back(mt);
             TypePackId mtPack = arena->addTypePack(std::move(unpackedTypes));
 
-            addConstraint(scope, call->location, UnpackConstraint{mtPack, *argTail});
+            auto c = addConstraint(scope, call->location, UnpackConstraint{mtPack, *argTail});
+            getMutable<BlockedType>(mt)->setOwner(c);
+            if (auto b = getMutable<BlockedType>(target); b && b->getOwner() == nullptr)
+                b->setOwner(c);
         }
 
         LUAU_ASSERT(target);
@@ -1719,8 +1720,8 @@ InferencePack ConstraintGenerator::checkPack(const ScopePtr& scope, AstExprCall*
          * 4. Solve the call
          */
 
-        NotNull<Constraint> checkConstraint =
-            addConstraint(scope, call->func->location, FunctionCheckConstraint{fnType, argPack, call, NotNull{&module->astExpectedTypes}});
+        NotNull<Constraint> checkConstraint = addConstraint(scope, call->func->location,
+            FunctionCheckConstraint{fnType, argPack, call, NotNull{&module->astTypes}, NotNull{&module->astExpectedTypes}});
 
         forEachConstraint(funcBeginCheckpoint, funcEndCheckpoint, this, [checkConstraint](const ConstraintPtr& constraint) {
             checkConstraint->dependencies.emplace_back(constraint.get());
@@ -1735,6 +1736,8 @@ InferencePack ConstraintGenerator::checkPack(const ScopePtr& scope, AstExprCall*
                 std::move(discriminantTypes),
                 &module->astOverloadResolvedTypes,
             });
+
+        getMutable<BlockedTypePack>(rets)->owner = callConstraint.get();
 
         callConstraint->dependencies.push_back(checkConstraint);
 
@@ -1854,12 +1857,12 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprLocal* local)
 
     // if we have a refinement key, we can look up its type.
     if (key)
-        maybeTy = lookup(scope, key->def);
+        maybeTy = lookup(scope, local->location, key->def);
 
     // if the current def doesn't have a type, we might be doing a compound assignment
     // and therefore might need to look at the rvalue def instead.
     if (!maybeTy && rvalueDef)
-        maybeTy = lookup(scope, *rvalueDef);
+        maybeTy = lookup(scope, local->location, *rvalueDef);
 
     if (maybeTy)
     {
@@ -1885,32 +1888,31 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprGlobal* globa
     /* prepopulateGlobalScope() has already added all global functions to the environment by this point, so any
      * global that is not already in-scope is definitely an unknown symbol.
      */
-    if (auto ty = lookup(scope, def, /*prototype=*/false))
+    if (auto ty = lookup(scope, global->location, def, /*prototype=*/false))
     {
         rootScope->lvalueTypes[def] = *ty;
         return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};
     }
     else
-    {
-        reportError(global->location, UnknownSymbol{global->name.value, UnknownSymbol::Binding});
         return Inference{builtinTypes->errorRecoveryType()};
-    }
 }
 
-Inference ConstraintGenerator::checkIndexName(const ScopePtr& scope, const RefinementKey* key, AstExpr* indexee, std::string index)
+Inference ConstraintGenerator::checkIndexName(const ScopePtr& scope, const RefinementKey* key, AstExpr* indexee, const std::string& index, Location indexLocation)
 {
     TypeId obj = check(scope, indexee).ty;
     TypeId result = arena->addType(BlockedType{});
 
     if (key)
     {
-        if (auto ty = lookup(scope, key->def))
+        if (auto ty = lookup(scope, indexLocation, key->def))
             return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};
 
         scope->rvalueRefinements[key->def] = result;
     }
 
-    addConstraint(scope, indexee->location, HasPropConstraint{result, obj, std::move(index), ValueContext::RValue});
+    auto c =
+        addConstraint(scope, indexee->location, HasPropConstraint{result, obj, std::move(index), ValueContext::RValue, inConditional(typeContext)});
+    getMutable<BlockedType>(result)->setOwner(c);
 
     if (key)
         return Inference{result, refinementArena.proposition(key, builtinTypes->truthyType)};
@@ -1921,7 +1923,7 @@ Inference ConstraintGenerator::checkIndexName(const ScopePtr& scope, const Refin
 Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprIndexName* indexName)
 {
     const RefinementKey* key = dfg->getRefinementKey(indexName);
-    return checkIndexName(scope, key, indexName->expr, indexName->index.value);
+    return checkIndexName(scope, key, indexName->expr, indexName->index.value, indexName->indexLocation);
 }
 
 Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprIndexExpr* indexExpr)
@@ -1929,27 +1931,25 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprIndexExpr* in
     if (auto constantString = indexExpr->index->as<AstExprConstantString>())
     {
         const RefinementKey* key = dfg->getRefinementKey(indexExpr);
-        return checkIndexName(scope, key, indexExpr->expr, constantString->value.data);
+        return checkIndexName(scope, key, indexExpr->expr, constantString->value.data, indexExpr->location);
     }
 
     TypeId obj = check(scope, indexExpr->expr).ty;
     TypeId indexType = check(scope, indexExpr->index).ty;
 
-    TypeId result = freshType(scope);
+    TypeId result = arena->addType(BlockedType{});
 
     const RefinementKey* key = dfg->getRefinementKey(indexExpr);
     if (key)
     {
-        if (auto ty = lookup(scope, key->def))
+        if (auto ty = lookup(scope, indexExpr->location, key->def))
             return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};
 
         scope->rvalueRefinements[key->def] = result;
     }
 
-    TableIndexer indexer{indexType, result};
-    TypeId tableType = arena->addType(TableType{TableType::Props{}, TableIndexer{indexType, result}, TypeLevel{}, scope.get(), TableState::Free});
-
-    addConstraint(scope, indexExpr->expr->location, SubtypeConstraint{obj, tableType});
+    auto c = addConstraint(scope, indexExpr->expr->location, HasIndexerConstraint{result, obj, indexType});
+    getMutable<BlockedType>(result)->setOwner(c);
 
     if (key)
         return Inference{result, refinementArena.proposition(key, builtinTypes->truthyType)};
@@ -1967,7 +1967,9 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprFunction* fun
     Checkpoint endCheckpoint = checkpoint(this);
 
     TypeId generalizedTy = arena->addType(BlockedType{});
-    NotNull<Constraint> gc = addConstraint(sig.signatureScope, func->location, GeneralizationConstraint{generalizedTy, sig.signature, std::move(interiorTypes.back())});
+    NotNull<Constraint> gc =
+        addConstraint(sig.signatureScope, func->location, GeneralizationConstraint{generalizedTy, sig.signature, std::move(interiorTypes.back())});
+    getMutable<BlockedType>(generalizedTy)->setOwner(gc);
     interiorTypes.pop_back();
 
     Constraint* previous = nullptr;
@@ -2001,32 +2003,17 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprUnary* unary)
     {
     case AstExprUnary::Op::Not:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.notFamily},
-            {operandType},
-            {},
-        });
-        addConstraint(scope, unary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.notFamily, {operandType}, {}, scope, unary->location);
         return Inference{resultType, refinementArena.negation(refinement)};
     }
     case AstExprUnary::Op::Len:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.lenFamily},
-            {operandType},
-            {},
-        });
-        addConstraint(scope, unary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.lenFamily, {operandType}, {}, scope, unary->location);
         return Inference{resultType, refinementArena.negation(refinement)};
     }
     case AstExprUnary::Op::Minus:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.unmFamily},
-            {operandType},
-            {},
-        });
-        addConstraint(scope, unary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.unmFamily, {operandType}, {}, scope, unary->location);
         return Inference{resultType, refinementArena.negation(refinement)};
     }
     default: // msvc can't prove that this is exhaustive.
@@ -2042,153 +2029,96 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprBinary* binar
     {
     case AstExprBinary::Op::Add:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.addFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.addFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Sub:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.subFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.subFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Mul:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.mulFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.mulFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Div:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.divFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.divFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::FloorDiv:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.idivFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.idivFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Pow:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.powFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.powFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Mod:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.modFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.modFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Concat:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.concatFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.concatFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::And:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.andFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.andFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Or:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.orFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.orFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::CompareLt:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.ltFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.ltFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::CompareGe:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.ltFamily},
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.ltFamily,
             {rightType, leftType}, // lua decided that `__ge(a, b)` is instead just `__lt(b, a)`
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+            {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::CompareLe:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.leFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.leFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::CompareGt:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.leFamily},
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.leFamily,
             {rightType, leftType}, // lua decided that `__gt(a, b)` is instead just `__le(b, a)`
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+            {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::CompareEq:
     case AstExprBinary::Op::CompareNe:
     {
-        TypeId resultType = arena->addType(TypeFamilyInstanceType{
-            NotNull{&kBuiltinTypeFamilies.eqFamily},
-            {leftType, rightType},
-            {},
-        });
-        addConstraint(scope, binary->location, ReduceConstraint{resultType});
+        DefId leftDef = dfg->getDef(binary->left);
+        DefId rightDef = dfg->getDef(binary->right);
+        bool leftSubscripted = containsSubscriptedDefinition(leftDef);
+        bool rightSubscripted = containsSubscriptedDefinition(rightDef);
+
+        if (leftSubscripted && rightSubscripted)
+        {
+            // we cannot add nil in this case because then we will blindly accept comparisons that we should not.
+        }
+        else if (leftSubscripted)
+            leftType = makeUnion(scope, binary->location, leftType, builtinTypes->nilType);
+        else if (rightSubscripted)
+            rightType = makeUnion(scope, binary->location, rightType, builtinTypes->nilType);
+
+        TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.eqFamily, {leftType, rightType}, {}, scope, binary->location);
         return Inference{resultType, std::move(refinement)};
     }
     case AstExprBinary::Op::Op__Count:
@@ -2200,8 +2130,11 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprBinary* binar
 
 Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprIfElse* ifElse, std::optional<TypeId> expectedType)
 {
-    ScopePtr condScope = childScope(ifElse->condition, scope);
-    RefinementId refinement = check(condScope, ifElse->condition).refinement;
+    RefinementId refinement = [&]() {
+        InConditionalContext flipper{&typeContext};
+        ScopePtr condScope = childScope(ifElse->condition, scope);
+        return check(condScope, ifElse->condition).refinement;
+    }();
 
     ScopePtr thenScope = childScope(ifElse->trueExpr, scope);
     applyRefinements(thenScope, ifElse->trueExpr->location, refinement);
@@ -2301,7 +2234,7 @@ std::tuple<TypeId, TypeId, RefinementId> ConstraintGenerator::checkBinary(
             TypeId ty = follow(typeFun->type);
 
             // We're only interested in the root class of any classes.
-            if (auto ctv = get<ClassType>(ty); !ctv || ctv->parent == builtinTypes->classType)
+            if (auto ctv = get<ClassType>(ty); ctv && ctv->parent == builtinTypes->classType)
                 discriminantTy = ty;
         }
 
@@ -2339,47 +2272,42 @@ std::tuple<TypeId, TypeId, RefinementId> ConstraintGenerator::checkBinary(
     }
 }
 
-std::optional<TypeId> ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExpr* expr, TypeId assignedTy, bool transform)
+ConstraintGenerator::LValueBounds ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExpr* expr)
 {
     if (auto local = expr->as<AstExprLocal>())
-        return checkLValue(scope, local, assignedTy, transform);
+        return checkLValue(scope, local);
     else if (auto global = expr->as<AstExprGlobal>())
-        return checkLValue(scope, global, assignedTy);
+        return checkLValue(scope, global);
     else if (auto indexName = expr->as<AstExprIndexName>())
-        return checkLValue(scope, indexName, assignedTy);
+        return checkLValue(scope, indexName);
     else if (auto indexExpr = expr->as<AstExprIndexExpr>())
-        return checkLValue(scope, indexExpr, assignedTy);
+        return checkLValue(scope, indexExpr);
     else if (auto error = expr->as<AstExprError>())
     {
         check(scope, error);
-        return builtinTypes->errorRecoveryType();
+        return {builtinTypes->errorRecoveryType(), builtinTypes->errorRecoveryType()};
     }
     else
         ice->ice("checkLValue is inexhaustive");
 }
 
-std::optional<TypeId> ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprLocal* local, TypeId assignedTy, bool transform)
+ConstraintGenerator::LValueBounds ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprLocal* local)
 {
     std::optional<TypeId> annotatedTy = scope->lookup(local->local);
     LUAU_ASSERT(annotatedTy);
-    if (annotatedTy)
-        addConstraint(scope, local->location, SubtypeConstraint{assignedTy, *annotatedTy});
 
     const DefId defId = dfg->getDef(local);
     std::optional<TypeId> ty = scope->lookupUnrefinedType(defId);
 
     if (ty)
     {
-        if (transform)
+        if (auto lt = getMutable<LocalType>(*ty))
+            ++lt->blockCount;
+        else if (auto ut = getMutable<UnionType>(*ty))
         {
-            if (auto lt = getMutable<LocalType>(*ty))
-                ++lt->blockCount;
-            else if (auto ut = getMutable<UnionType>(*ty))
-            {
-                for (TypeId optTy : ut->options)
-                    if (auto lt = getMutable<LocalType>(optTy))
-                        ++lt->blockCount;
-            }
+            for (TypeId optTy : ut->options)
+                if (auto lt = getMutable<LocalType>(optTy))
+                    ++lt->blockCount;
         }
     }
     else
@@ -2404,32 +2332,46 @@ std::optional<TypeId> ConstraintGenerator::checkLValue(const ScopePtr& scope, As
         scope->lvalueTypes[defId] = *ty;
     }
 
-    if (transform)
-    {
-        addConstraint(scope, local->location,
-            UnpackConstraint{arena->addTypePack({*ty}), arena->addTypePack({assignedTy}),
-                /*resultIsLValue*/ true});
+    // TODO: Need to clip this, but this requires more code to be reworked first before we can clip this.
+    std::optional<TypeId> assignedTy = arena->addType(BlockedType{});
 
-        recordInferredBinding(local->local, *ty);
+    auto unpackC = addConstraint(scope, local->location, Unpack1Constraint{*ty, *assignedTy, /*resultIsLValue*/ true});
+
+    if (auto blocked = get<BlockedType>(*ty))
+    {
+        if (blocked->getOwner())
+            unpackC->dependencies.push_back(NotNull{blocked->getOwner()});
+        else if (auto blocked = getMutable<BlockedType>(*ty))
+            blocked->setOwner(unpackC);
     }
 
+    recordInferredBinding(local->local, *ty);
 
-    return ty;
+    return {annotatedTy, assignedTy};
 }
 
-std::optional<TypeId> ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprGlobal* global, TypeId assignedTy)
+ConstraintGenerator::LValueBounds ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprGlobal* global)
 {
-    return scope->lookup(Symbol{global->name});
+    std::optional<TypeId> annotatedTy = scope->lookup(Symbol{global->name});
+    if (annotatedTy)
+    {
+        DefId def = dfg->getDef(global);
+        TypeId assignedTy = arena->addType(BlockedType{});
+        rootScope->lvalueTypes[def] = assignedTy;
+        return {annotatedTy, assignedTy};
+    }
+    else
+        return {annotatedTy, std::nullopt};
 }
 
-std::optional<TypeId> ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprIndexName* indexName, TypeId assignedTy)
+ConstraintGenerator::LValueBounds ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprIndexName* indexName)
 {
-    return updateProperty(scope, indexName, assignedTy);
+    return updateProperty(scope, indexName);
 }
 
-std::optional<TypeId> ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprIndexExpr* indexExpr, TypeId assignedTy)
+ConstraintGenerator::LValueBounds ConstraintGenerator::checkLValue(const ScopePtr& scope, AstExprIndexExpr* indexExpr)
 {
-    return updateProperty(scope, indexExpr, assignedTy);
+    return updateProperty(scope, indexExpr);
 }
 
 /**
@@ -2437,15 +2379,14 @@ std::optional<TypeId> ConstraintGenerator::checkLValue(const ScopePtr& scope, As
  *
  * If expr has the form name.a.b.c
  */
-TypeId ConstraintGenerator::updateProperty(const ScopePtr& scope, AstExpr* expr, TypeId assignedTy)
+ConstraintGenerator::LValueBounds ConstraintGenerator::updateProperty(const ScopePtr& scope, AstExpr* expr)
 {
     // There are a bunch of cases where we realize that this is not the kind of
     // assignment that potentially changes the shape of a table.  When we
     // encounter them, we call this to fall back and do the "usual thing."
-    auto fallback = [&]() {
+    auto fallback = [&]() -> LValueBounds {
         TypeId resTy = check(scope, expr).ty;
-        addConstraint(scope, expr->location, SubtypeConstraint{assignedTy, resTy});
-        return resTy;
+        return {resTy, std::nullopt};
     };
 
     LUAU_ASSERT(expr->is<AstExprIndexName>() || expr->is<AstExprIndexExpr>());
@@ -2464,14 +2405,15 @@ TypeId ConstraintGenerator::updateProperty(const ScopePtr& scope, AstExpr* expr,
         // a.b.c[1] = 44 -- lvalue
         // a.b[4].c = 2 -- rvalue
 
-        TypeId resultType = arena->addType(BlockedType{});
         TypeId subjectType = check(scope, indexExpr->expr).ty;
         TypeId indexType = check(scope, indexExpr->index).ty;
-        addConstraint(scope, expr->location, SetIndexerConstraint{resultType, subjectType, indexType, assignedTy});
+        TypeId assignedTy = arena->addType(BlockedType{});
+        auto sic = addConstraint(scope, expr->location, SetIndexerConstraint{subjectType, indexType, assignedTy});
+        getMutable<BlockedType>(assignedTy)->setOwner(sic);
 
         module->astTypes[expr] = assignedTy;
 
-        return assignedTy;
+        return {assignedTy, assignedTy};
     }
 
     Symbol sym;
@@ -2537,7 +2479,9 @@ TypeId ConstraintGenerator::updateProperty(const ScopePtr& scope, AstExpr* expr,
     std::vector<std::string> segmentStrings(begin(segments), end(segments));
 
     TypeId updatedType = arena->addType(BlockedType{});
+    TypeId assignedTy = arena->addType(BlockedType{});
     auto setC = addConstraint(scope, expr->location, SetPropConstraint{updatedType, subjectType, std::move(segmentStrings), assignedTy});
+    getMutable<BlockedType>(updatedType)->setOwner(setC);
 
     TypeId prevSegmentTy = updatedType;
     for (size_t i = 0; i < segments.size(); ++i)
@@ -2545,7 +2489,8 @@ TypeId ConstraintGenerator::updateProperty(const ScopePtr& scope, AstExpr* expr,
         TypeId segmentTy = arena->addType(BlockedType{});
         module->astTypes[exprs[i]] = segmentTy;
         ValueContext ctx = i == segments.size() - 1 ? ValueContext::LValue : ValueContext::RValue;
-        auto hasC = addConstraint(scope, expr->location, HasPropConstraint{segmentTy, prevSegmentTy, segments[i], ctx});
+        auto hasC = addConstraint(scope, expr->location, HasPropConstraint{segmentTy, prevSegmentTy, segments[i], ctx, inConditional(typeContext)});
+        getMutable<BlockedType>(segmentTy)->setOwner(hasC);
         setC->dependencies.push_back(hasC);
         prevSegmentTy = segmentTy;
     }
@@ -2566,13 +2511,11 @@ TypeId ConstraintGenerator::updateProperty(const ScopePtr& scope, AstExpr* expr,
         }
     }
 
-    return assignedTy;
+    return {assignedTy, assignedTy};
 }
 
 Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprTable* expr, std::optional<TypeId> expectedType)
 {
-    const bool expectedTypeIsFree = expectedType && get<FreeType>(follow(*expectedType));
-
     TypeId ty = arena->addType(TableType{});
     TableType* ttv = getMutable<TableType>(ty);
     LUAU_ASSERT(ttv);
@@ -2582,110 +2525,29 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprTable* expr, 
 
     interiorTypes.back().push_back(ty);
 
-    auto createIndexer = [this, scope, ttv](const Location& location, TypeId currentIndexType, TypeId currentResultType) {
-        if (!ttv->indexer)
-        {
-            TypeId indexType = this->freshType(scope);
-            TypeId resultType = this->freshType(scope);
-            ttv->indexer = TableIndexer{indexType, resultType};
-        }
+    TypeIds indexKeyLowerBound;
+    TypeIds indexValueLowerBound;
 
-        addConstraint(scope, location, SubtypeConstraint{ttv->indexer->indexType, currentIndexType});
-        addConstraint(scope, location, SubtypeConstraint{ttv->indexer->indexResultType, currentResultType});
+    auto createIndexer = [&indexKeyLowerBound, &indexValueLowerBound](const Location& location, TypeId currentIndexType, TypeId currentResultType) {
+        indexKeyLowerBound.insert(follow(currentIndexType));
+        indexValueLowerBound.insert(follow(currentResultType));
     };
 
-    std::optional<TypeId> annotatedKeyType;
-    std::optional<TypeId> annotatedIndexResultType;
-
-    if (expectedType)
-    {
-        if (const TableType* ttv = get<TableType>(follow(*expectedType)))
-        {
-            if (ttv->indexer)
-            {
-                annotatedKeyType.emplace(follow(ttv->indexer->indexType));
-                annotatedIndexResultType.emplace(ttv->indexer->indexResultType);
-            }
-        }
-    }
-
-    bool isIndexedResultType = false;
-    std::optional<TypeId> pinnedIndexResultType;
-
+    TypeIds valuesLowerBound;
 
     for (const AstExprTable::Item& item : expr->items)
     {
-        std::optional<TypeId> expectedValueType;
-        if (item.kind == AstExprTable::Item::Kind::General || item.kind == AstExprTable::Item::Kind::List)
-            isIndexedResultType = true;
+        // Expected types are threaded through table literals separately via the
+        // function matchLiteralType.
 
-        if (item.key && expectedType && !expectedTypeIsFree)
-        {
-            if (auto stringKey = item.key->as<AstExprConstantString>())
-            {
-                ErrorVec errorVec;
-                std::optional<TypeId> propTy =
-                    findTablePropertyRespectingMeta(builtinTypes, errorVec, follow(*expectedType), stringKey->value.data, item.value->location);
-                if (propTy)
-                    expectedValueType = propTy;
-                else
-                {
-                    expectedValueType = arena->addType(BlockedType{});
-                    addConstraint(scope, item.value->location,
-                        HasPropConstraint{
-                            *expectedValueType, *expectedType, stringKey->value.data, ValueContext::RValue, /*suppressSimplification*/ true});
-                }
-            }
-        }
-
-        // We'll resolve the expected index result type here with the following priority:
-        // 1. Record table types - in which key, value pairs must be handled on a k,v pair basis.
-        // In this case, the above if-statement will populate expectedValueType
-        // 2. Someone places an annotation on a General or List table
-        // Trust the annotation and have the solver inform them if they get it wrong
-        // 3. Someone omits the annotation on a general or List table
-        // Use the type of the first indexResultType as the expected type
-        std::optional<TypeId> checkExpectedIndexResultType;
-        if (expectedValueType)
-        {
-            checkExpectedIndexResultType = expectedValueType;
-        }
-        else if (annotatedIndexResultType)
-        {
-            checkExpectedIndexResultType = annotatedIndexResultType;
-        }
-        else if (pinnedIndexResultType)
-        {
-            checkExpectedIndexResultType = pinnedIndexResultType;
-        }
-
-        TypeId itemTy = check(scope, item.value, checkExpectedIndexResultType).ty;
-
-        // we should preserve error-suppressingness from the expected value type if we have one
-        if (expectedValueType)
-        {
-            switch (shouldSuppressErrors(normalizer, *expectedValueType))
-            {
-            case ErrorSuppression::DoNotSuppress:
-                break;
-            case ErrorSuppression::Suppress:
-                itemTy = simplifyUnion(builtinTypes, arena, itemTy, builtinTypes->errorType).result;
-                break;
-            case ErrorSuppression::NormalizationFailed:
-                reportError(item.value->location, NormalizationTooComplex{});
-                break;
-            }
-        }
-
-        if (isIndexedResultType && !pinnedIndexResultType)
-            pinnedIndexResultType = itemTy;
+        TypeId itemTy = check(scope, item.value).ty;
 
         if (item.key)
         {
             // Even though we don't need to use the type of the item's key if
             // it's a string constant, we still want to check it to populate
             // astTypes.
-            TypeId keyTy = check(scope, item.key, annotatedKeyType).ty;
+            TypeId keyTy = check(scope, item.key).ty;
 
             if (AstExprConstantString* key = item.key->as<AstExprConstantString>())
             {
@@ -2703,6 +2565,29 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprTable* expr, 
             // right.
             createIndexer(item.value->location, numberType, itemTy);
         }
+    }
+
+    if (!indexKeyLowerBound.empty())
+    {
+        LUAU_ASSERT(!indexValueLowerBound.empty());
+
+        TypeId indexKey = indexKeyLowerBound.size() == 1
+                              ? *indexKeyLowerBound.begin()
+                              : arena->addType(UnionType{std::vector(indexKeyLowerBound.begin(), indexKeyLowerBound.end())});
+
+        TypeId indexValue = indexValueLowerBound.size() == 1
+                                ? *indexValueLowerBound.begin()
+                                : arena->addType(UnionType{std::vector(indexValueLowerBound.begin(), indexValueLowerBound.end())});
+
+        ttv->indexer = TableIndexer{indexKey, indexValue};
+    }
+
+    if (expectedType)
+    {
+        Unifier2 unifier{arena, builtinTypes, NotNull{scope.get()}, ice};
+        std::vector<TypeId> toBlock;
+        matchLiteralType(
+            NotNull{&module->astTypes}, NotNull{&module->astExpectedTypes}, builtinTypes, arena, NotNull{&unifier}, *expectedType, ty, expr, toBlock);
     }
 
     return Inference{ty};
@@ -2762,13 +2647,15 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
     // This check ensures that expectedType is precisely optional and not any (since any is also an optional type)
     if (expectedType && isOptional(*expectedType) && !get<AnyType>(*expectedType))
     {
-        auto ut = get<UnionType>(*expectedType);
-        for (auto u : ut)
+        if (auto ut = get<UnionType>(*expectedType))
         {
-            if (get<FunctionType>(u) && !isNil(u))
+            for (auto u : ut)
             {
-                expectedFunction = get<FunctionType>(u);
-                break;
+                if (get<FunctionType>(u) && !isNil(u))
+                {
+                    expectedFunction = get<FunctionType>(u);
+                    break;
+                }
             }
         }
     }
@@ -2858,11 +2745,11 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
         // generate constraints for return types, we have a guarantee that we
         // know the annotated return type already, if one was provided.
         LUAU_ASSERT(get<FreeTypePack>(returnType));
-        asMutable(returnType)->ty.emplace<BoundTypePack>(annotatedRetType);
+        emplaceTypePack<BoundTypePack>(asMutable(returnType), annotatedRetType);
     }
     else if (expectedFunction)
     {
-        asMutable(returnType)->ty.emplace<BoundTypePack>(expectedFunction->retTypes);
+        emplaceTypePack<BoundTypePack>(asMutable(returnType), expectedFunction->retTypes);
     }
 
     // TODO: Preserve argument names in the function's type.
@@ -3283,7 +3170,8 @@ Inference ConstraintGenerator::flattenPack(const ScopePtr& scope, Location locat
 
     TypeId typeResult = arena->addType(BlockedType{});
     TypePackId resultPack = arena->addTypePack({typeResult}, arena->freshTypePack(scope.get()));
-    addConstraint(scope, location, UnpackConstraint{resultPack, tp});
+    auto c = addConstraint(scope, location, UnpackConstraint{resultPack, tp});
+    getMutable<BlockedType>(typeResult)->setOwner(c);
 
     return Inference{typeResult, refinement};
 }
@@ -3306,24 +3194,14 @@ void ConstraintGenerator::reportCodeTooComplex(Location location)
 
 TypeId ConstraintGenerator::makeUnion(const ScopePtr& scope, Location location, TypeId lhs, TypeId rhs)
 {
-    TypeId resultType = arena->addType(TypeFamilyInstanceType{
-        NotNull{&kBuiltinTypeFamilies.unionFamily},
-        {lhs, rhs},
-        {},
-    });
-    addConstraint(scope, location, ReduceConstraint{resultType});
+    TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.unionFamily, {lhs, rhs}, {}, scope, location);
 
     return resultType;
 }
 
 TypeId ConstraintGenerator::makeIntersect(const ScopePtr& scope, Location location, TypeId lhs, TypeId rhs)
 {
-    TypeId resultType = arena->addType(TypeFamilyInstanceType{
-        NotNull{&kBuiltinTypeFamilies.intersectFamily},
-        {lhs, rhs},
-        {},
-    });
-    addConstraint(scope, location, ReduceConstraint{resultType});
+    TypeId resultType = createTypeFamilyInstance(kBuiltinTypeFamilies.intersectFamily, {lhs, rhs}, {}, scope, location);
 
     return resultType;
 }
@@ -3401,8 +3279,7 @@ void ConstraintGenerator::fillInInferredBindings(const ScopePtr& globalScope, As
             scope->bindings[symbol] = Binding{tys.front(), location};
         else
         {
-            TypeId ty = arena->addType(BlockedType{});
-            addConstraint(globalScope, Location{}, SetOpConstraint{SetOpConstraint::Union, ty, std::move(tys)});
+            TypeId ty = createTypeFamilyInstance(kBuiltinTypeFamilies.unionFamily, std::move(tys), {}, globalScope, location);
 
             scope->bindings[symbol] = Binding{ty, location};
         }
@@ -3470,6 +3347,14 @@ std::vector<std::optional<TypeId>> ConstraintGenerator::getExpectedCallTypesForF
     // TODO vvijay Feb 24, 2023 apparently we have to demote the types here?
 
     return expectedTypes;
+}
+
+TypeId ConstraintGenerator::createTypeFamilyInstance(
+    const TypeFamily& family, std::vector<TypeId> typeArguments, std::vector<TypePackId> packArguments, const ScopePtr& scope, Location location)
+{
+    TypeId result = arena->addTypeFamily(family, typeArguments, packArguments);
+    addConstraint(scope, location, ReduceConstraint{result});
+    return result;
 }
 
 std::vector<NotNull<Constraint>> borrowConstraints(const std::vector<ConstraintPtr>& constraints)

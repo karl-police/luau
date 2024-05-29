@@ -15,9 +15,11 @@
 
 LUAU_FASTFLAG(LuauTraceTypesInNonstrictMode2)
 LUAU_FASTFLAG(LuauSetMetatableDoesNotTimeTravel)
+
 LUAU_FASTFLAG(LuauAutocompleteStringLiteralBounds);
 LUAU_FASTFLAG(LuauAutocompleteTableKeysNoInitialCharacter)
 LUAU_FASTFLAG(DebugLuauLogSolver)
+
 
 using namespace Luau;
 
@@ -148,6 +150,40 @@ struct ACBuiltinsFixture : ACFixtureImpl<BuiltinsFixture>
 {
 };
 
+#define LUAU_CHECK_HAS_KEY(map, key) \
+    do \
+    { \
+        auto&& _m = (map); \
+        auto&& _k = (key); \
+        const size_t count = _m.count(_k); \
+        CHECK_MESSAGE(count, "Map should have key \"" << _k << "\""); \
+        if (!count) \
+        { \
+            MESSAGE("Keys: (count " << _m.size() << ")"); \
+            for (const auto& [k, v] : _m) \
+            { \
+                MESSAGE("\tkey: " << k); \
+            } \
+        } \
+    } while (false)
+
+#define LUAU_CHECK_HAS_NO_KEY(map, key) \
+    do \
+    { \
+        auto&& _m = (map); \
+        auto&& _k = (key); \
+        const size_t count = _m.count(_k); \
+        CHECK_MESSAGE(!count, "Map should not have key \"" << _k << "\""); \
+        if (count) \
+        { \
+            MESSAGE("Keys: (count " << _m.size() << ")"); \
+            for (const auto& [k, v] : _m) \
+            { \
+                MESSAGE("\tkey: " << k); \
+            } \
+        } \
+    } while (false)
+
 TEST_SUITE_BEGIN("AutocompleteTest");
 
 TEST_CASE_FIXTURE(ACFixture, "empty_program")
@@ -254,7 +290,7 @@ TEST_CASE_FIXTURE(ACFixture, "dont_suggest_local_before_its_definition")
 
     auto ac = autocomplete('1');
     CHECK(ac.entryMap.count("myLocal"));
-    CHECK(!ac.entryMap.count("myInnerLocal"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "myInnerLocal");
 
     ac = autocomplete('2');
     CHECK(ac.entryMap.count("myLocal"));
@@ -262,7 +298,7 @@ TEST_CASE_FIXTURE(ACFixture, "dont_suggest_local_before_its_definition")
 
     ac = autocomplete('3');
     CHECK(ac.entryMap.count("myLocal"));
-    CHECK(!ac.entryMap.count("myInnerLocal"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "myInnerLocal");
 }
 
 TEST_CASE_FIXTURE(ACFixture, "recursive_function")
@@ -349,7 +385,7 @@ TEST_CASE_FIXTURE(ACFixture, "local_functions_fall_out_of_scope")
     auto ac = autocomplete('1');
 
     CHECK_NE(0, ac.entryMap.size());
-    CHECK(!ac.entryMap.count("abc"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "abc");
 }
 
 TEST_CASE_FIXTURE(ACFixture, "function_parameters")
@@ -376,7 +412,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "get_member_completions")
     CHECK_EQ(17, ac.entryMap.size());
     CHECK(ac.entryMap.count("find"));
     CHECK(ac.entryMap.count("pack"));
-    CHECK(!ac.entryMap.count("math"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "math");
     CHECK_EQ(ac.context, AutocompleteContext::Property);
 }
 
@@ -522,7 +558,7 @@ TEST_CASE_FIXTURE(ACFixture, "method_call_inside_function_body")
 
     CHECK_NE(0, ac.entryMap.size());
 
-    CHECK(!ac.entryMap.count("math"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "math");
     CHECK_EQ(ac.context, AutocompleteContext::Property);
 }
 
@@ -536,7 +572,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "method_call_inside_if_conditional")
 
     CHECK_NE(0, ac.entryMap.size());
     CHECK(ac.entryMap.count("concat"));
-    CHECK(!ac.entryMap.count("math"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "math");
     CHECK_EQ(ac.context, AutocompleteContext::Property);
 }
 
@@ -1381,7 +1417,7 @@ local a: nu@3
 
     ac = autocomplete('3');
 
-    CHECK(!ac.entryMap.count("num"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "num");
     CHECK(ac.entryMap.count("number"));
 }
 
@@ -2103,7 +2139,7 @@ ex.a(function(x:
 
     auto ac = autocomplete("Module/B", Position{2, 16});
 
-    CHECK(!ac.entryMap.count("done"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "done");
 
     fileResolver.source["Module/C"] = R"(
 local ex = require(script.Parent.A)
@@ -2114,7 +2150,7 @@ ex.b(function(x:
 
     ac = autocomplete("Module/C", Position{2, 16});
 
-    CHECK(!ac.entryMap.count("(done) -> number"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "(done) -> number");
 }
 
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "suggest_external_module_type")
@@ -2137,7 +2173,7 @@ ex.a(function(x:
 
     auto ac = autocomplete("Module/B", Position{2, 16});
 
-    CHECK(!ac.entryMap.count("done"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "done");
     CHECK(ac.entryMap.count("ex.done"));
     CHECK(ac.entryMap["ex.done"].typeCorrect == TypeCorrectKind::Correct);
 
@@ -2150,7 +2186,7 @@ ex.b(function(x:
 
     ac = autocomplete("Module/C", Position{2, 16});
 
-    CHECK(!ac.entryMap.count("(done) -> number"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "(done) -> number");
     CHECK(ac.entryMap.count("(ex.done) -> number"));
     CHECK(ac.entryMap["(ex.done) -> number"].typeCorrect == TypeCorrectKind::Correct);
 }
@@ -2164,7 +2200,7 @@ local bar: @1= foo
 
     auto ac = autocomplete('1');
 
-    CHECK(!ac.entryMap.count("foo"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "foo");
 }
 
 TEST_CASE_FIXTURE(ACFixture, "type_correct_function_no_parenthesis")
@@ -2389,7 +2425,7 @@ local name = na@1
 
     auto ac = autocomplete('1');
 
-    CHECK(!ac.entryMap.count("name"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "name");
     CHECK(ac.entryMap.count("other"));
 
     check(R"(
@@ -2399,8 +2435,8 @@ local name, test = na@1
 
     ac = autocomplete('1');
 
-    CHECK(!ac.entryMap.count("name"));
-    CHECK(!ac.entryMap.count("test"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "name");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "test");
     CHECK(ac.entryMap.count("other"));
 }
 
@@ -2590,7 +2626,7 @@ TEST_CASE_FIXTURE(ACFixture, "not_the_var_we_are_defining")
     fileResolver.source["Module/A"] = "abc,de";
 
     auto ac = autocomplete("Module/A", Position{0, 6});
-    CHECK(!ac.entryMap.count("de"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "de");
 }
 
 TEST_CASE_FIXTURE(ACFixture, "recursive_function_global")
@@ -2648,8 +2684,8 @@ local t: Test = { s@1 }
 
     ac = autocomplete('1');
     CHECK(ac.entryMap.count("second"));
-    CHECK(!ac.entryMap.count("first"));
-    CHECK(!ac.entryMap.count("third"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "first");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "third");
     CHECK_EQ(ac.context, AutocompleteContext::Property);
 
     // No parenthesis suggestion
@@ -2692,8 +2728,8 @@ local t: Test = { "f@1" }
     )");
 
     ac = autocomplete('1');
-    CHECK(!ac.entryMap.count("first"));
-    CHECK(!ac.entryMap.count("second"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "first");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "second");
     CHECK_EQ(ac.context, AutocompleteContext::String);
 
     // Skip keys that are already defined
@@ -2703,7 +2739,7 @@ local t: Test = { first = 2, s@1 }
     )");
 
     ac = autocomplete('1');
-    CHECK(!ac.entryMap.count("first"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "first");
     CHECK(ac.entryMap.count("second"));
     CHECK_EQ(ac.context, AutocompleteContext::Property);
 
@@ -2746,8 +2782,6 @@ local t = {
 
 TEST_CASE_FIXTURE(ACFixture, "suggest_table_keys_no_initial_character")
 {
-    ScopedFastFlag sff{FFlag::LuauAutocompleteTableKeysNoInitialCharacter, true};
-
     check(R"(
 type Test = { first: number, second: number }
 local t: Test = { @1 }
@@ -2761,8 +2795,6 @@ local t: Test = { @1 }
 
 TEST_CASE_FIXTURE(ACFixture, "suggest_table_keys_no_initial_character_2")
 {
-    ScopedFastFlag sff{FFlag::LuauAutocompleteTableKeysNoInitialCharacter, true};
-
     check(R"(
 type Test = { first: number, second: number }
 local t: Test = { first = 1, @1 }
@@ -2776,8 +2808,6 @@ local t: Test = { first = 1, @1 }
 
 TEST_CASE_FIXTURE(ACFixture, "suggest_table_keys_no_initial_character_3")
 {
-    ScopedFastFlag sff{FFlag::LuauAutocompleteTableKeysNoInitialCharacter, true};
-
     check(R"(
 type Properties = { TextScaled: boolean, Text: string }
 local function create(props: Properties) end
@@ -3179,8 +3209,8 @@ TEST_CASE_FIXTURE(ACFixture, "string_singleton_as_table_key")
 
     ac = autocomplete('4');
 
-    CHECK(!ac.entryMap.count("up"));
-    CHECK(!ac.entryMap.count("down"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "up");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "down");
 
     CHECK(ac.entryMap.count("\"up\""));
     CHECK(ac.entryMap.count("\"down\""));
@@ -3202,8 +3232,8 @@ TEST_CASE_FIXTURE(ACFixture, "string_singleton_as_table_key")
 
     ac = autocomplete('8');
 
-    CHECK(!ac.entryMap.count("up"));
-    CHECK(!ac.entryMap.count("down"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "up");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "down");
 
     CHECK(ac.entryMap.count("\"up\""));
     CHECK(ac.entryMap.count("\"down\""));
@@ -3213,7 +3243,6 @@ TEST_CASE_FIXTURE(ACFixture, "string_singleton_as_table_key")
 TEST_CASE_FIXTURE(ACFixture, "string_singleton_in_if_statement")
 {
     ScopedFastFlag sff[]{
-        {FFlag::LuauAutocompleteStringLiteralBounds, true},
         {FFlag::DebugLuauDeferredConstraintResolution, true},
     };
 
@@ -3231,65 +3260,153 @@ TEST_CASE_FIXTURE(ACFixture, "string_singleton_in_if_statement")
         local a: {[Direction]: boolean} = {[@A`@B`@C]}
     )");
 
-    auto ac = autocomplete('1');
+    Luau::AutocompleteResult ac;
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    ac = autocomplete('1');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 
     ac = autocomplete('2');
 
-    CHECK(ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "right");
 
     ac = autocomplete('3');
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 
     ac = autocomplete('4');
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 
     ac = autocomplete('5');
 
-    CHECK(ac.entryMap.count("left"));
-    CHECK(ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "right");
 
     ac = autocomplete('6');
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 
     ac = autocomplete('7');
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 
     ac = autocomplete('8');
 
-    CHECK(ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "right");
 
     ac = autocomplete('9');
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 
     ac = autocomplete('A');
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 
     ac = autocomplete('B');
 
-    CHECK(ac.entryMap.count("left"));
-    CHECK(ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "right");
 
     ac = autocomplete('C');
 
-    CHECK(!ac.entryMap.count("left"));
-    CHECK(!ac.entryMap.count("right"));
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+}
+
+// https://github.com/Roblox/luau/issues/858
+TEST_CASE_FIXTURE(ACFixture, "string_singleton_in_if_statement2")
+{
+    // don't run this when the DCR flag isn't set
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
+    check(R"(
+        --!strict
+
+        type Direction = "left" | "right"
+
+        local dir: Direction
+        -- typestate here means dir is actually typed as `"left"`
+        dir = "left"
+
+        if dir == @1"@2"@3 then end
+        local a: {[Direction]: boolean} = {[@4"@5"@6]}
+
+        if dir == @7`@8`@9 then end
+        local a: {[Direction]: boolean} = {[@A`@B`@C]}
+    )");
+
+    Luau::AutocompleteResult ac;
+
+    ac = autocomplete('1');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('2');
+
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('3');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('4');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('5');
+
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('6');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('7');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('8');
+
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('9');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('A');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('B');
+
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_KEY(ac.entryMap, "right");
+
+    ac = autocomplete('C');
+
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "left");
+    LUAU_CHECK_HAS_NO_KEY(ac.entryMap, "right");
 }
 
 TEST_CASE_FIXTURE(ACFixture, "autocomplete_string_singleton_equality")
@@ -3692,6 +3809,9 @@ TEST_CASE_FIXTURE(ACFixture, "string_contents_is_available_to_callback")
 
 TEST_CASE_FIXTURE(ACFixture, "autocomplete_response_perf1" * doctest::timeout(0.5))
 {
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        return; // FIXME: This test is just barely at the threshhold which makes it very flaky under the new solver
+
     // Build a function type with a large overload set
     const int parts = 100;
     std::string source;

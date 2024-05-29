@@ -22,6 +22,37 @@ enum class ValueContext
     RValue
 };
 
+/// the current context of the type checker
+enum class TypeContext
+{
+    /// the default context
+    Default,
+    /// inside of a condition
+    Condition,
+};
+
+bool inConditional(const TypeContext& context);
+
+// sets the given type context to `Condition` and restores it to its original
+// value when the struct drops out of scope
+struct InConditionalContext
+{
+    TypeContext* typeContext;
+    TypeContext oldValue;
+
+    InConditionalContext(TypeContext* c)
+        : typeContext(c)
+        , oldValue(*c)
+    {
+        *typeContext = TypeContext::Condition;
+    }
+
+    ~InConditionalContext()
+    {
+        *typeContext = oldValue;
+    }
+};
+
 using ScopePtr = std::shared_ptr<struct Scope>;
 
 std::optional<TypeId> findMetatableEntry(
@@ -30,6 +61,8 @@ std::optional<TypeId> findTablePropertyRespectingMeta(
     NotNull<BuiltinTypes> builtinTypes, ErrorVec& errors, TypeId ty, const std::string& name, Location location);
 std::optional<TypeId> findTablePropertyRespectingMeta(
     NotNull<BuiltinTypes> builtinTypes, ErrorVec& errors, TypeId ty, const std::string& name, ValueContext context, Location location);
+
+bool occursCheck(TypeId needle, TypeId haystack);
 
 // Returns the minimum and maximum number of types the argument list can accept.
 std::pair<size_t, std::optional<size_t>> getParameterExtents(const TxnLog* log, TypePackId tp, bool includeHiddenVariadics = false);
@@ -164,6 +197,15 @@ const T* get(std::optional<Ty> ty)
 {
     if (ty)
         return get<T>(*ty);
+    else
+        return nullptr;
+}
+
+template<typename T, typename Ty>
+T* getMutable(std::optional<Ty> ty)
+{
+    if (ty)
+        return getMutable<T>(*ty);
     else
         return nullptr;
 }

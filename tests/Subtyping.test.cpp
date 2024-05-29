@@ -225,9 +225,9 @@ struct SubtypeFixture : Fixture
                                    });
 
     TypeId readOnlyVec2Class = cls("ReadOnlyVec2", {
-        {"X", Property::readonly(builtinTypes->numberType)},
-        {"Y", Property::readonly(builtinTypes->numberType)},
-    });
+                                                       {"X", Property::readonly(builtinTypes->numberType)},
+                                                       {"Y", Property::readonly(builtinTypes->numberType)},
+                                                   });
 
     // "hello" | "hello"
     TypeId helloOrHelloType = arena.addType(UnionType{{helloType, helloType}});
@@ -448,6 +448,26 @@ TEST_CASE_FIXTURE(SubtypeFixture, "basic_typefamily_with_generics")
     TypeId superFunction = arena.addType(std::move(superFt));
     SubtypingResult result = isSubtype(functionType, superFunction);
     CHECK(result.isSubtype);
+}
+
+TEST_CASE_FIXTURE(SubtypeFixture, "variadic_subpath_in_pack")
+{
+    TypePackId subTArgs = arena.addTypePack(TypePack{{builtinTypes->stringType, builtinTypes->stringType}, builtinTypes->anyTypePack});
+    TypePackId superTArgs = arena.addTypePack(TypePack{{builtinTypes->numberType}, builtinTypes->anyTypePack});
+    // (string, string, ...any) -> number
+    TypeId functionSub = arena.addType(FunctionType{subTArgs, arena.addTypePack({builtinTypes->numberType})});
+    // (number, ...any) -> string
+    TypeId functionSuper = arena.addType(FunctionType{superTArgs, arena.addTypePack({builtinTypes->stringType})});
+
+
+    SubtypingResult result = isSubtype(functionSub, functionSuper);
+    CHECK(result.reasoning == std::vector{SubtypingReasoning{TypePath::PathBuilder().rets().index(0).build(),
+                                              TypePath::PathBuilder().rets().index(0).build(), SubtypingVariance::Covariant},
+                                  SubtypingReasoning{TypePath::PathBuilder().args().index(0).build(), TypePath::PathBuilder().args().index(0).build(),
+                                      SubtypingVariance::Contravariant},
+                                  SubtypingReasoning{TypePath::PathBuilder().args().index(1).build(),
+                                      TypePath::PathBuilder().args().tail().variadic().build(), SubtypingVariance::Contravariant}});
+    CHECK(!result.isSubtype);
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "any <!: unknown")
@@ -1263,6 +1283,30 @@ TEST_CASE_FIXTURE(SubtypeFixture, "<T>({ x: T }) -> T <: ({ method: <T>({ x: T }
     TypeId otherType = fn({tbl({{"method", tableToPropType}, {"x", builtinTypes->numberType}})}, {builtinTypes->numberType});
 
     CHECK_IS_SUBTYPE(tableToPropType, otherType);
+}
+
+TEST_CASE_FIXTURE(SubtypeFixture, "subtyping_reasonings_to_follow_a_reduced_type_family_instance")
+{
+    TypeId longTy = arena.addType(UnionType{{builtinTypes->booleanType, builtinTypes->bufferType, builtinTypes->classType, builtinTypes->functionType,
+        builtinTypes->numberType, builtinTypes->stringType, builtinTypes->tableType, builtinTypes->threadType}});
+    TypeId tblTy = tbl({{"depth", builtinTypes->unknownType}});
+    TypeId combined = meet(longTy, tblTy);
+    TypeId subTy = arena.addType(TypeFamilyInstanceType{NotNull{&builtinTypeFamilies.unionFamily}, {combined, builtinTypes->neverType}, {}});
+    TypeId superTy = builtinTypes->neverType;
+    SubtypingResult result = isSubtype(subTy, superTy);
+    CHECK(!result.isSubtype);
+
+    for (const SubtypingReasoning& reasoning : result.reasoning)
+    {
+        if (reasoning.subPath.empty() && reasoning.superPath.empty())
+            continue;
+
+        std::optional<TypeOrPack> optSubLeaf = traverse(subTy, reasoning.subPath, builtinTypes);
+        std::optional<TypeOrPack> optSuperLeaf = traverse(superTy, reasoning.superPath, builtinTypes);
+
+        if (!optSubLeaf || !optSuperLeaf)
+            CHECK(false);
+    }
 }
 
 TEST_SUITE_END();

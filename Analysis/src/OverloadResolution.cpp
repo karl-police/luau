@@ -292,8 +292,13 @@ std::pair<OverloadResolver::Analysis, ErrorVec> OverloadResolver::checkOverload_
 
         if (failedSubPack && failedSuperPack)
         {
-            LUAU_ASSERT(!argExprs->empty());
-            argLocation = argExprs->at(argExprs->size() - 1)->location;
+            // If a bug in type inference occurs, we may have a mismatch in the return packs.
+            // This happens when inference incorrectly leaves the result type of a function free.
+            // If this happens, we don't want to explode, so we'll use the function's location.
+            if (argExprs->empty())
+                argLocation = fnExpr->location;
+            else
+                argLocation = argExprs->at(argExprs->size() - 1)->location;
 
             // TODO extract location from the SubtypingResult path and argExprs
             switch (reason.variance)
@@ -358,30 +363,30 @@ void OverloadResolver::add(Analysis analysis, TypeId ty, ErrorVec&& errors)
     }
 }
 
-
-SolveResult solveFunctionCall(
-    NotNull<TypeArena> arena,
-    NotNull<BuiltinTypes> builtinTypes,
-    NotNull<Normalizer> normalizer,
-    NotNull<InternalErrorReporter> iceReporter,
-    NotNull<TypeCheckLimits> limits,
-    NotNull<Scope> scope,
-    const Location& location,
-    TypeId fn,
-    TypePackId argsPack
-)
+// we wrap calling the overload resolver in a separate function to reduce overall stack pressure in `solveFunctionCall`.
+// this limits the lifetime of `OverloadResolver`, a large type, to only as long as it is actually needed.
+std::optional<TypeId> selectOverload(NotNull<BuiltinTypes> builtinTypes, NotNull<TypeArena> arena, NotNull<Normalizer> normalizer,
+    NotNull<Scope> scope, NotNull<InternalErrorReporter> iceReporter, NotNull<TypeCheckLimits> limits, const Location& location, TypeId fn,
+    TypePackId argsPack)
 {
-    OverloadResolver resolver{
-        builtinTypes, NotNull{arena}, normalizer, scope, iceReporter, limits, location};
+    OverloadResolver resolver{builtinTypes, arena, normalizer, scope, iceReporter, limits, location};
     auto [status, overload] = resolver.selectOverload(fn, argsPack);
-    TypeId overloadToUse = fn;
+
     if (status == OverloadResolver::Analysis::Ok)
-        overloadToUse = overload;
-    else if (get<AnyType>(fn) || get<FreeType>(fn))
-    {
-        // Nothing.  Let's keep going
-    }
-    else
+        return overload;
+
+    if (get<AnyType>(fn) || get<FreeType>(fn))
+        return fn;
+
+    return {};
+}
+
+SolveResult solveFunctionCall(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtinTypes, NotNull<Normalizer> normalizer,
+    NotNull<InternalErrorReporter> iceReporter, NotNull<TypeCheckLimits> limits, NotNull<Scope> scope, const Location& location, TypeId fn,
+    TypePackId argsPack)
+{
+    std::optional<TypeId> overloadToUse = selectOverload(builtinTypes, arena, normalizer, scope, iceReporter, limits, location, fn, argsPack);
+    if (!overloadToUse)
         return {SolveResult::NoMatchingOverload};
 
     TypePackId resultPack = arena->freshTypePack(scope);
@@ -389,7 +394,7 @@ SolveResult solveFunctionCall(
     TypeId inferredTy = arena->addType(FunctionType{TypeLevel{}, scope.get(), argsPack, resultPack});
     Unifier2 u2{NotNull{arena}, builtinTypes, scope, iceReporter};
 
-    const bool occursCheckPassed = u2.unify(overloadToUse, inferredTy);
+    const bool occursCheckPassed = u2.unify(*overloadToUse, inferredTy);
 
     if (!u2.genericSubstitutions.empty() || !u2.genericPackSubstitutions.empty())
     {
@@ -411,7 +416,7 @@ SolveResult solveFunctionCall(
     result.typePackId = resultPack;
 
     LUAU_ASSERT(overloadToUse);
-    result.overloadToUse = overloadToUse;
+    result.overloadToUse = *overloadToUse;
     result.inferredTy = inferredTy;
     result.expandedFreeTypes = std::move(u2.expandedFreeTypes);
 

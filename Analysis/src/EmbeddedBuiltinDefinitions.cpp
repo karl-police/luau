@@ -2,7 +2,6 @@
 #include "Luau/BuiltinDefinitions.h"
 
 LUAU_FASTFLAGVARIABLE(LuauCheckedEmbeddedDefinitions2, false);
-LUAU_FASTFLAG(LuauCheckedFunctionSyntax);
 
 namespace Luau
 {
@@ -314,9 +313,9 @@ type DateTypeResult = {
 }
 
 declare os: {
-    time: @checked (time: DateTypeArg?) -> number,
+    time: (time: DateTypeArg?) -> number,
     date: ((formatString: "*t" | "!*t", time: number?) -> DateTypeResult) & ((formatString: string?, time: number?) -> string),
-    difftime: @checked (t2: DateTypeResult | number, t1: DateTypeResult | number) -> number,
+    difftime: (t2: DateTypeResult | number, t1: DateTypeResult | number) -> number,
     clock: () -> number,
 }
 
@@ -452,7 +451,7 @@ std::string getBuiltinDefinitionSource()
     std::string result = kBuiltinDefinitionLuaSrc;
 
     // Annotates each non generic function as checked
-    if (FFlag::LuauCheckedEmbeddedDefinitions2 && FFlag::LuauCheckedFunctionSyntax)
+    if (FFlag::LuauCheckedEmbeddedDefinitions2)
         result = kBuiltinDefinitionLuaSrcChecked;
 
     return result;

@@ -9,6 +9,7 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
+LUAU_DYNAMIC_FASTINT(LuauSimplificationComplexityLimit)
 
 namespace
 {
@@ -133,8 +134,8 @@ TEST_CASE_FIXTURE(SimplifyFixture, "unknown_and_other_tops_and_bottom_types")
 
     CHECK(unknownTy == intersect(unknownTy, unknownTy));
 
-    CHECK("*error-type* | unknown" == intersectStr(unknownTy, anyTy));
-    CHECK("*error-type* | unknown" == intersectStr(anyTy, unknownTy));
+    CHECK("any" == intersectStr(unknownTy, anyTy));
+    CHECK("any" == intersectStr(anyTy, unknownTy));
 
     CHECK(neverTy == intersect(unknownTy, neverTy));
     CHECK(neverTy == intersect(neverTy, unknownTy));
@@ -211,6 +212,14 @@ TEST_CASE_FIXTURE(SimplifyFixture, "any_and_indeterminate_types")
     REQUIRE(anyLhsPending->options.size() == 2);
     CHECK(pendingTy == anyLhsPending->options[0]);
     CHECK(errorTy == anyLhsPending->options[1]);
+}
+
+TEST_CASE_FIXTURE(SimplifyFixture, "union_where_lhs_elements_are_a_subset_of_the_rhs")
+{
+    TypeId lhs = union_(numberTy, stringTy);
+    TypeId rhs = union_(stringTy, numberTy);
+
+    CHECK("number | string" == toString(union_(lhs, rhs)));
 }
 
 TEST_CASE_FIXTURE(SimplifyFixture, "unknown_and_indeterminate_types")
@@ -443,6 +452,7 @@ TEST_CASE_FIXTURE(SimplifyFixture, "union")
 
 TEST_CASE_FIXTURE(SimplifyFixture, "two_unions")
 {
+    ScopedFastInt sfi{DFInt::LuauSimplificationComplexityLimit, 10};
     TypeId t1 = arena->addType(UnionType{{numberTy, booleanTy, stringTy, nilTy, tableTy}});
 
     CHECK("false?" == intersectStr(t1, falsyTy));
@@ -567,6 +577,17 @@ TEST_CASE_FIXTURE(SimplifyFixture, "bound_intersected_by_itself_should_be_itself
 {
     TypeId blocked = arena->addType(BlockedType{});
     CHECK(toString(blocked) == intersectStr(blocked, blocked));
+}
+
+TEST_CASE_FIXTURE(SimplifyFixture, "cyclic_never_union_and_string")
+{
+    // t1 where t1 = never | t1
+    TypeId leftType = arena->addType(UnionType{{builtinTypes->neverType, builtinTypes->neverType}});
+    UnionType* leftUnion = getMutable<UnionType>(leftType);
+    REQUIRE(leftUnion);
+    leftUnion->options[0] = leftType;
+
+    CHECK(builtinTypes->stringType == union_(leftType, builtinTypes->stringType));
 }
 
 TEST_SUITE_END();

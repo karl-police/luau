@@ -103,6 +103,14 @@ struct SubtypingEnvironment
     DenseHashMap<TypeId, GenericBounds> mappedGenerics{nullptr};
     DenseHashMap<TypePackId, TypePackId> mappedGenericPacks{nullptr};
 
+    /*
+     * See the test cyclic_tables_are_assumed_to_be_compatible_with_classes for
+     * details.
+     *
+     * An empty value is equivalent to a nonexistent key.
+     */
+    DenseHashMap<TypeId, TypeId> substitutions{nullptr};
+
     DenseHashMap<std::pair<TypeId, TypeId>, SubtypingResult, TypePairHash> ephemeralCache{{}};
 
     /// Applies `mappedGenerics` to the given type.
@@ -192,7 +200,7 @@ private:
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const MetatableType* subMt, const MetatableType* superMt);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const MetatableType* subMt, const TableType* superTable);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const ClassType* subClass, const ClassType* superClass);
-    SubtypingResult isCovariantWith(SubtypingEnvironment& env, const ClassType* subClass, const TableType* superTable);
+    SubtypingResult isCovariantWith(SubtypingEnvironment& env, TypeId subTy, const ClassType* subClass, TypeId superTy, const TableType* superTable);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const FunctionType* subFunction, const FunctionType* superFunction);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const PrimitiveType* subPrim, const TableType* superTable);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const SingletonType* subSingleton, const TableType* superTable);
@@ -200,7 +208,8 @@ private:
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const TableIndexer& subIndexer, const TableIndexer& superIndexer);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const Property& subProperty, const Property& superProperty, const std::string& name);
 
-    SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedType* subNorm, const NormalizedType* superNorm);
+    SubtypingResult isCovariantWith(
+        SubtypingEnvironment& env, const std::shared_ptr<const NormalizedType>& subNorm, const std::shared_ptr<const NormalizedType>& superNorm);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedClassType& subClass, const NormalizedClassType& superClass);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedClassType& subClass, const TypeIds& superTables);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedStringType& subString, const NormalizedStringType& superString);

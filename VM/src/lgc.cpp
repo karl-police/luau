@@ -14,6 +14,8 @@
 
 #include <string.h>
 
+LUAU_FASTFLAG(LuauLoadTypeInfo)
+
 /*
  * Luau uses an incremental non-generational non-moving mark&sweep garbage collector.
  *
@@ -504,8 +506,17 @@ static size_t propagatemark(global_State* g)
         Proto* p = gco2p(o);
         g->gray = p->gclist;
         traverseproto(g, p);
-        return sizeof(Proto) + sizeof(Instruction) * p->sizecode + sizeof(Proto*) * p->sizep + sizeof(TValue) * p->sizek + p->sizelineinfo +
-               sizeof(LocVar) * p->sizelocvars + sizeof(TString*) * p->sizeupvalues;
+
+        if (FFlag::LuauLoadTypeInfo)
+        {
+            return sizeof(Proto) + sizeof(Instruction) * p->sizecode + sizeof(Proto*) * p->sizep + sizeof(TValue) * p->sizek + p->sizelineinfo +
+                   sizeof(LocVar) * p->sizelocvars + sizeof(TString*) * p->sizeupvalues + p->sizetypeinfo;
+        }
+        else
+        {
+            return sizeof(Proto) + sizeof(Instruction) * p->sizecode + sizeof(Proto*) * p->sizep + sizeof(TValue) * p->sizek + p->sizelineinfo +
+                   sizeof(LocVar) * p->sizelocvars + sizeof(TString*) * p->sizeupvalues;
+        }
     }
     default:
         LUAU_ASSERT(0);
@@ -929,7 +940,7 @@ static size_t gcstep(lua_State* L, size_t limit)
     {
         while (g->sweepgcopage && cost < limit)
         {
-            lua_Page* next = luaM_getnextgcopage(g->sweepgcopage); // page sweep might destroy the page
+            lua_Page* next = luaM_getnextpage(g->sweepgcopage); // page sweep might destroy the page
 
             int steps = sweepgcopage(L, g->sweepgcopage);
 

@@ -37,12 +37,18 @@ struct Replacer : Substitution
 
     TypeId clean(TypeId ty) override
     {
-        return replacements[ty];
+        TypeId res = replacements[ty];
+        LUAU_ASSERT(res);
+        dontTraverseInto(res);
+        return res;
     }
 
     TypePackId clean(TypePackId tp) override
     {
-        return replacementPacks[tp];
+        TypePackId res = replacementPacks[tp];
+        LUAU_ASSERT(res);
+        dontTraverseInto(res);
+        return res;
     }
 };
 
@@ -61,10 +67,16 @@ struct Instantiation2 : Substitution
     {
     }
 
+    bool ignoreChildren(TypeId ty) override;
     bool isDirty(TypeId ty) override;
     bool isDirty(TypePackId tp) override;
     TypeId clean(TypeId ty) override;
     TypePackId clean(TypePackId tp) override;
 };
+
+std::optional<TypeId> instantiate2(
+    TypeArena* arena, DenseHashMap<TypeId, TypeId> genericSubstitutions, DenseHashMap<TypePackId, TypePackId> genericPackSubstitutions, TypeId ty);
+std::optional<TypePackId> instantiate2(TypeArena* arena, DenseHashMap<TypeId, TypeId> genericSubstitutions,
+    DenseHashMap<TypePackId, TypePackId> genericPackSubstitutions, TypePackId tp);
 
 } // namespace Luau

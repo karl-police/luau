@@ -173,6 +173,41 @@ end
 assert(pcall(fuzzfail18) == true)
 assert(fuzzfail18() == 0)
 
+local function fuzzfail19()
+  local _ = 2
+  _ += _
+  _ = _,_ >= _,{_ >= _,_ >= _,_(),}
+
+  local _ = 2
+  do
+    _ = assert({n0=_,_,n0=_,}),{_={_[_()],},_,}
+  end
+end
+
+assert(pcall(fuzzfail19) == false)
+
+local function fuzzfail20()
+  assert(true)
+  assert(false,(_),true)
+  _ = nil
+end
+
+assert(pcall(fuzzfail20) == false)
+
+local function fuzzfail21(...)
+  local _ = assert,_
+  if _ then else return _ / _ end
+  _(_)
+  _(_,_)
+  assert(...,_)
+  _((not _),_)
+  _(true,_ / _)
+  _(_,_())
+  return _
+end
+
+assert(pcall(fuzzfail21) == false)
+
 local function arraySizeInv1()
   local t = {1, 2, nil, nil, nil, nil, nil, nil, nil, true}
 
@@ -426,5 +461,27 @@ function deadStoreChecks1()
 end
 
 assert(deadStoreChecks1() == 111)
+
+local function extramath1(a)
+  return type(math.sign(a))
+end
+
+assert(extramath1(2) == "number")
+assert(extramath1("2") == "number")
+
+local function extramath2(a)
+  return type(math.modf(a))
+end
+
+assert(extramath2(2) == "number")
+assert(extramath2("2") == "number")
+
+local function extramath3(a)
+  local b, c = math.modf(a)
+  return type(c)
+end
+
+assert(extramath3(2) == "number")
+assert(extramath3("2") == "number")
 
 return('OK')

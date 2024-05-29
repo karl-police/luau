@@ -402,15 +402,7 @@ TEST_CASE_FIXTURE(Fixture, "calling_self_generic_methods")
         end
     )");
 
-    if (FFlag::DebugLuauDeferredConstraintResolution)
-    {
-        LUAU_REQUIRE_NO_ERRORS(result);
-
-        CHECK_EQ("{ f: (t1) -> (), id: <a>(unknown, a) -> a } where t1 = { read id: ((t1, number) -> number) & ((t1, string) -> string) }",
-            toString(requireType("x"), {true}));
-    }
-    else
-        LUAU_REQUIRE_ERRORS(result);
+    LUAU_REQUIRE_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(Fixture, "infer_generic_property")
@@ -836,7 +828,7 @@ y.a.c = y
     if (FFlag::DebugLuauDeferredConstraintResolution)
         CHECK(
             toString(result.errors.at(0)) ==
-            R"(Type 'x' could not be converted into 'T<number>'; type x[read "a"][read "c"] (nil) is not exactly T<number>[read "a"][read "c"][0] (T<number>))");
+            R"(Type '{ a: { c: nil, d: number }, b: number }' could not be converted into 'T<number>'; type { a: { c: nil, d: number }, b: number }[read "a"][read "c"] (nil) is not exactly T<number>[read "a"][read "c"][0] (T<number>))");
     else
     {
         const std::string expected = R"(Type 'y' could not be converted into 'T<string>'

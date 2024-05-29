@@ -7,13 +7,17 @@
 #include "Luau/NotNull.h"
 #include "Luau/StringUtils.h"
 #include "Luau/ToString.h"
+#include "Luau/TypeFamily.h"
 
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 
 LUAU_FASTINTVARIABLE(LuauIndentTypeMismatchMaxTypeLength, 10)
+
+LUAU_DYNAMIC_FASTFLAGVARIABLE(LuauImproveNonFunctionCallError, false)
 
 static std::string wrongNumberOfArgsString(
     size_t expectedCount, std::optional<size_t> maximumCount, size_t actualCount, const char* argPrefix = nullptr, bool isVariadic = false)
@@ -58,6 +62,23 @@ static std::string wrongNumberOfArgsString(
 
 namespace Luau
 {
+
+// this list of binary operator type families is used for better stringification of type families errors
+static const std::unordered_map<std::string, const char*> kBinaryOps{
+    {"add", "+"}, {"sub", "-"}, {"mul", "*"}, {"div", "/"}, {"idiv", "//"}, {"pow", "^"}, {"mod", "%"}, {"concat", ".."}, {"and", "and"},
+    {"or", "or"},  {"lt", "< or >="}, {"le", "<= or >"}, {"eq", "== or ~="}
+};
+
+// this list of unary operator type families is used for better stringification of type families errors
+static const std::unordered_map<std::string, const char*> kUnaryOps{
+    {"unm", "-"}, {"len", "#"}, {"not", "not"}
+};
+
+// this list of type families will receive a special error indicating that the user should file a bug on the GitHub repository
+// putting a type family in this list indicates that it is expected to _always_ reduce
+static const std::unordered_set<std::string> kUnreachableTypeFamilies{
+    "refine", "singleton", "union", "intersect"
+};
 
 struct ErrorConverter
 {
@@ -335,8 +356,65 @@ struct ErrorConverter
         return e.message;
     }
 
+    std::optional<TypeId> findCallMetamethod(TypeId type) const
+    {
+        type = follow(type);
+
+        std::optional<TypeId> metatable;
+        if (const MetatableType* mtType = get<MetatableType>(type))
+            metatable = mtType->metatable;
+        else if (const ClassType* classType = get<ClassType>(type))
+            metatable = classType->metatable;
+
+        if (!metatable)
+            return std::nullopt;
+
+        TypeId unwrapped = follow(*metatable);
+
+        if (get<AnyType>(unwrapped))
+            return unwrapped;
+
+        const TableType* mtt = getTableType(unwrapped);
+        if (!mtt)
+            return std::nullopt;
+
+        auto it = mtt->props.find("__call");
+        if (it != mtt->props.end())
+            return it->second.type();
+        else
+            return std::nullopt;
+    }
+
     std::string operator()(const Luau::CannotCallNonFunction& e) const
     {
+        if (DFFlag::LuauImproveNonFunctionCallError)
+        {
+            if (auto unionTy = get<UnionType>(follow(e.ty)))
+            {
+                std::string err = "Cannot call a value of the union type:";
+
+                for (auto option : unionTy)
+                {
+                    option = follow(option);
+
+                    if (get<FunctionType>(option) || findCallMetamethod(option))
+                    {
+                        err += "\n  | " + toString(option);
+                        continue;
+                    }
+
+                    // early-exit if we find something that isn't callable in the union.
+                    return "Cannot call a value of type " + toString(option) + " in union:\n  " + toString(e.ty);
+                }
+
+                err += "\nWe are unable to determine the appropriate result type for such a call.";
+
+                return err;
+            }
+
+            return "Cannot call a value of type " + toString(e.ty);
+        }
+
         return "Cannot call non-function " + toString(e.ty);
     }
     std::string operator()(const Luau::ExtraInformation& e) const
@@ -506,6 +584,96 @@ struct ErrorConverter
 
     std::string operator()(const UninhabitedTypeFamily& e) const
     {
+        auto tfit = get<TypeFamilyInstanceType>(e.ty);
+        LUAU_ASSERT(tfit); // Luau analysis has actually done something wrong if this type is not a type family.
+        if (!tfit)
+            return "Unexpected type " + Luau::toString(e.ty) + " flagged as an uninhabited type family.";
+
+        // unary operators
+        if (auto unaryString = kUnaryOps.find(tfit->family->name); unaryString != kUnaryOps.end())
+        {
+            std::string result = "Operator '" + std::string(unaryString->second) + "' could not be applied to ";
+
+            if (tfit->typeArguments.size() == 1 && tfit->packArguments.empty())
+            {
+                result += "operand of type " + Luau::toString(tfit->typeArguments[0]);
+
+                if (tfit->family->name != "not")
+                    result += "; there is no corresponding overload for __" + tfit->family->name;
+            }
+            else
+            {
+                // if it's not the expected case, we ought to add a specialization later, but this is a sane default.
+                result += "operands of types ";
+
+                bool isFirst = true;
+                for (auto arg : tfit->typeArguments)
+                {
+                    if (!isFirst)
+                        result += ", ";
+
+                    result += Luau::toString(arg);
+                    isFirst = false;
+                }
+
+                for (auto packArg : tfit->packArguments)
+                    result += ", " + Luau::toString(packArg);
+            }
+
+            return result;
+        }
+
+        // binary operators
+        if (auto binaryString = kBinaryOps.find(tfit->family->name); binaryString != kBinaryOps.end())
+        {
+            std::string result = "Operator '" + std::string(binaryString->second) + "' could not be applied to operands of types ";
+
+            if (tfit->typeArguments.size() == 2 && tfit->packArguments.empty())
+            {
+                // this is the expected case.
+                result += Luau::toString(tfit->typeArguments[0]) + " and " + Luau::toString(tfit->typeArguments[1]);
+            }
+            else
+            {
+                // if it's not the expected case, we ought to add a specialization later, but this is a sane default.
+
+                bool isFirst = true;
+                for (auto arg : tfit->typeArguments)
+                {
+                    if (!isFirst)
+                        result += ", ";
+
+                    result += Luau::toString(arg);
+                    isFirst = false;
+                }
+
+                for (auto packArg : tfit->packArguments)
+                    result += ", " + Luau::toString(packArg);
+            }
+
+            result += "; there is no corresponding overload for __" + tfit->family->name;
+
+            return result;
+        }
+
+        // miscellaneous
+
+        if ("keyof" == tfit->family->name || "rawkeyof" == tfit->family->name)
+        {
+            if (tfit->typeArguments.size() == 1 && tfit->packArguments.empty())
+                return "Type '" + toString(tfit->typeArguments[0]) + "' does not have keys, so '" + Luau::toString(e.ty) + "' is invalid";
+            else
+                return "Type family instance " + Luau::toString(e.ty) + " is ill-formed, and thus invalid";
+        }
+
+        if (kUnreachableTypeFamilies.count(tfit->family->name))
+        {
+            return "Type family instance " + Luau::toString(e.ty) + " is uninhabited\n" +
+                "This is likely to be a bug, please report it at https://github.com/luau-lang/luau/issues";
+        }
+
+        // Everything should be specialized above to report a more descriptive error that hopefully does not mention "type families" explicitly.
+        // If we produce this message, it's an indication that we've missed a specialization and it should be fixed!
         return "Type family instance " + Luau::toString(e.ty) + " is uninhabited";
     }
 
@@ -590,6 +758,25 @@ struct ErrorConverter
     std::string operator()(const UnexpectedTypePackInSubtyping& e) const
     {
         return "Encountered an unexpected type pack in subtyping: " + toString(e.tp);
+    }
+
+    std::string operator()(const CannotAssignToNever& e) const
+    {
+        std::string result = "Cannot assign a value of type " + toString(e.rhsType) + " to a field of type never";
+
+        switch (e.reason)
+        {
+        case CannotAssignToNever::Reason::PropertyNarrowed:
+            if (!e.cause.empty())
+            {
+                result += "\ncaused by the property being given the following incompatible types:\n";
+                for (auto ty : e.cause)
+                    result += "    " + toString(ty) + "\n";
+                result += "There are no values that could safely satisfy all of these types at once.";
+            }
+        }
+
+        return result;
     }
 };
 
@@ -950,6 +1137,20 @@ bool UnexpectedTypePackInSubtyping::operator==(const UnexpectedTypePackInSubtypi
     return tp == rhs.tp;
 }
 
+bool CannotAssignToNever::operator==(const CannotAssignToNever& rhs) const
+{
+    if (cause.size() != rhs.cause.size())
+        return false;
+
+    for (size_t i = 0; i < cause.size(); ++i)
+    {
+        if (*cause[i] != *rhs.cause[i])
+            return false;
+    }
+
+    return *rhsType == *rhs.rhsType && reason == rhs.reason;
+}
+
 std::string toString(const TypeError& error)
 {
     return toString(error, TypeErrorToStringOptions{});
@@ -1140,6 +1341,13 @@ void copyError(T& e, TypeArena& destArena, CloneState& cloneState)
         e.ty = clone(e.ty);
     else if constexpr (std::is_same_v<T, UnexpectedTypePackInSubtyping>)
         e.tp = clone(e.tp);
+    else if constexpr (std::is_same_v<T, CannotAssignToNever>)
+    {
+        e.rhsType = clone(e.rhsType);
+
+        for (auto& ty : e.cause)
+            ty = clone(ty);
+    }
     else
         static_assert(always_false_v<T>, "Non-exhaustive type switch");
 }

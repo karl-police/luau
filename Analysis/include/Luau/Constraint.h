@@ -52,13 +52,6 @@ struct GeneralizationConstraint
     std::vector<TypeId> interiorTypes;
 };
 
-// subType ~ inst superType
-struct InstantiationConstraint
-{
-    TypeId subType;
-    TypeId superType;
-};
-
 // variables ~ iterate iterator
 // Unpack the iterator, figure out what types it iterates over, and bind those types to variables.
 struct IterableConstraint
@@ -112,6 +105,7 @@ struct FunctionCheckConstraint
     TypePackId argsPack;
 
     class AstExprCall* callSite = nullptr;
+    NotNull<DenseHashMap<const AstExpr*, TypeId>> astTypes;
     NotNull<DenseHashMap<const AstExpr*, TypeId>> astExpectedTypes;
 };
 
@@ -157,6 +151,15 @@ struct HasPropConstraint
     std::string prop;
     ValueContext context;
 
+    // We want to track if this `HasPropConstraint` comes from a conditional.
+    // If it does, we're going to change the behavior of property look-up a bit.
+    // In particular, we're going to return `unknownType` for property lookups
+    // on `table` or inexact table types where the property is not present.
+    //
+    // This allows us to refine table types to have additional properties
+    // without reporting errors in typechecking on the property tests.
+    bool inConditional = false;
+
     // HACK: We presently need types like true|false or string|"hello" when
     // deciding whether a particular literal expression should have a singleton
     // type.  This boolean is set to true when extracting the property type of a
@@ -193,6 +196,19 @@ struct SetPropConstraint
     TypeId propType;
 };
 
+// resultType ~ hasIndexer subjectType indexType
+//
+// If the subject type is a table or table-like thing that supports indexing,
+// populate the type result with the result type of such an index operation.
+//
+// If the subject is not indexable, resultType is bound to errorType.
+struct HasIndexerConstraint
+{
+    TypeId resultType;
+    TypeId subjectType;
+    TypeId indexType;
+};
+
 // result ~ setIndexer subjectType indexType propType
 //
 // If the subject is a table or table-like thing that already has an indexer,
@@ -201,21 +217,9 @@ struct SetPropConstraint
 // If the table is a free or unsealed table, we augment it with a new indexer.
 struct SetIndexerConstraint
 {
-    TypeId resultType;
     TypeId subjectType;
     TypeId indexType;
     TypeId propType;
-};
-
-// if negation:
-//   result ~ if isSingleton D then ~D else unknown where D = discriminantType
-// if not negation:
-//   result ~ if isSingleton D then D else unknown where D = discriminantType
-struct SingletonOrTopTypeConstraint
-{
-    TypeId resultType;
-    TypeId discriminantType;
-    bool negated;
 };
 
 // resultType ~ unpack sourceTypePack
@@ -233,20 +237,18 @@ struct UnpackConstraint
     bool resultIsLValue = false;
 };
 
-// resultType ~ T0 op T1 op ... op TN
+// resultType ~ unpack sourceType
 //
-// op is either union or intersection.  If any of the input types are blocked,
-// this constraint will block unless forced.
-struct SetOpConstraint
+// The same as UnpackConstraint, but specialized for a pair of types as opposed to packs.
+struct Unpack1Constraint
 {
-    enum
-    {
-        Intersection,
-        Union
-    } mode;
-
     TypeId resultType;
-    std::vector<TypeId> types;
+    TypeId sourceType;
+
+    // UnpackConstraint is sometimes used to resolve the types of assignments.
+    // When this is the case, any LocalTypes in resultPack can have their
+    // domains extended by the corresponding type from sourcePack.
+    bool resultIsLValue = false;
 };
 
 // ty ~ reduce ty
@@ -265,10 +267,9 @@ struct ReducePackConstraint
     TypePackId tp;
 };
 
-using ConstraintV = Variant<SubtypeConstraint, PackSubtypeConstraint, GeneralizationConstraint, InstantiationConstraint, IterableConstraint,
-    NameConstraint, TypeAliasExpansionConstraint, FunctionCallConstraint, FunctionCheckConstraint, PrimitiveTypeConstraint, HasPropConstraint,
-    SetPropConstraint, SetIndexerConstraint, SingletonOrTopTypeConstraint, UnpackConstraint, SetOpConstraint, ReduceConstraint, ReducePackConstraint,
-    EqualityConstraint>;
+using ConstraintV = Variant<SubtypeConstraint, PackSubtypeConstraint, GeneralizationConstraint, IterableConstraint, NameConstraint,
+    TypeAliasExpansionConstraint, FunctionCallConstraint, FunctionCheckConstraint, PrimitiveTypeConstraint, HasPropConstraint, SetPropConstraint,
+    HasIndexerConstraint, SetIndexerConstraint, UnpackConstraint, Unpack1Constraint, ReduceConstraint, ReducePackConstraint, EqualityConstraint>;
 
 struct Constraint
 {
@@ -283,10 +284,12 @@ struct Constraint
 
     std::vector<NotNull<Constraint>> dependencies;
 
-    DenseHashSet<TypeId> getFreeTypes() const;
+    DenseHashSet<TypeId> getMaybeMutatedFreeTypes() const;
 };
 
 using ConstraintPtr = std::unique_ptr<Constraint>;
+
+bool isReferenceCountedType(const TypeId typ);
 
 inline Constraint& asMutable(const Constraint& c)
 {

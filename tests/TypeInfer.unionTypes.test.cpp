@@ -9,9 +9,27 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
-LUAU_FASTFLAG(LuauTransitiveSubtyping);
 
 TEST_SUITE_BEGIN("UnionTypes");
+
+TEST_CASE_FIXTURE(Fixture, "fuzzer_union_with_one_part_assertion")
+{
+    CheckResult result = check(R"(
+local _ = {},nil
+repeat
+
+_,_ = if _.number == "" or _.number or _._ then
+             _
+      elseif _.__index == _._G then
+            tostring
+      elseif _ then
+             _
+      else
+           ``,_._G
+
+until _._
+    )");
+}
 
 TEST_CASE_FIXTURE(Fixture, "return_types_can_be_disjoint")
 {
@@ -561,6 +579,42 @@ TEST_CASE_FIXTURE(Fixture, "dont_allow_cyclic_unions_to_be_inferred")
     LUAU_REQUIRE_NO_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(Fixture, "indexing_into_a_cyclic_union_doesnt_crash")
+{
+    // It shouldn't be possible to craft a cyclic union, but even if we do, we
+    // shouldn't blow up.
+
+    TypeArena& arena = frontend.globals.globalTypes;
+    unfreeze(arena);
+
+    TypeId badCyclicUnionTy = arena.freshType(frontend.globals.globalScope.get());
+    UnionType u;
+
+    u.options.push_back(badCyclicUnionTy);
+    u.options.push_back(arena.addType(TableType{
+        {}, TableIndexer{builtinTypes->numberType, builtinTypes->numberType}, TypeLevel{}, frontend.globals.globalScope.get(), TableState::Sealed}));
+
+    asMutable(badCyclicUnionTy)->ty.emplace<UnionType>(std::move(u));
+
+    frontend.globals.globalScope->exportedTypeBindings["BadCyclicUnion"] = TypeFun{{}, badCyclicUnionTy};
+
+    freeze(arena);
+
+    CheckResult result = check(R"(
+        function f(x: BadCyclicUnion)
+            return x[0]
+        end
+    )");
+
+    // The old solver has a bug: It doesn't consider this goofy thing to be a
+    // table.  It's not really important.  What's important is that we don't
+    // crash, hang, or ICE.
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_NO_ERRORS(result);
+    else
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "table_union_write_indirect")
 {
 
@@ -832,10 +886,6 @@ TEST_CASE_FIXTURE(Fixture, "optional_any")
 
 TEST_CASE_FIXTURE(Fixture, "generic_function_with_optional_arg")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     CheckResult result = check(R"(
         function f<T>(x : T?) : {T}
             local result = {}

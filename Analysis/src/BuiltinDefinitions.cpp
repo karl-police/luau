@@ -24,8 +24,6 @@
  */
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
-LUAU_FASTFLAGVARIABLE(LuauSetMetatableOnUnionsOfTables, false);
-LUAU_FASTFLAGVARIABLE(LuauMakeStringMethodsChecked, false);
 
 namespace Luau
 {
@@ -431,7 +429,7 @@ static bool dcrMagicFunctionFormat(MagicFunctionCallContext context)
     // unify the prefix one argument at a time
     for (size_t i = 0; i < expected.size() && i + paramOffset < params.size(); ++i)
     {
-        context.solver->unify(context.solver->rootScope, context.callSite->location, params[i + paramOffset], expected[i]);
+        context.solver->unify(context.constraint, params[i + paramOffset], expected[i]);
     }
 
     // if we know the argument count or if we have too many arguments for sure, we can issue an error
@@ -561,7 +559,7 @@ static bool dcrMagicFunctionGmatch(MagicFunctionCallContext context)
     if (returnTypes.empty())
         return false;
 
-    context.solver->unify(context.solver->rootScope, context.callSite->location, params[0], context.solver->builtinTypes->stringType);
+    context.solver->unify(context.constraint, params[0], context.solver->builtinTypes->stringType);
 
     const TypePackId emptyPack = arena->addTypePack({});
     const TypePackId returnList = arena->addTypePack(returnTypes);
@@ -630,13 +628,13 @@ static bool dcrMagicFunctionMatch(MagicFunctionCallContext context)
     if (returnTypes.empty())
         return false;
 
-    context.solver->unify(context.solver->rootScope, context.callSite->location, params[0], context.solver->builtinTypes->stringType);
+    context.solver->unify(context.constraint, params[0], context.solver->builtinTypes->stringType);
 
     const TypeId optionalNumber = arena->addType(UnionType{{context.solver->builtinTypes->nilType, context.solver->builtinTypes->numberType}});
 
     size_t initIndex = context.callSite->self ? 1 : 2;
     if (params.size() == 3 && context.callSite->args.size > initIndex)
-        context.solver->unify(context.solver->rootScope, context.callSite->location, params[2], optionalNumber);
+        context.solver->unify(context.constraint, params[2], optionalNumber);
 
     const TypePackId returnList = arena->addTypePack(returnTypes);
     asMutable(context.result)->ty.emplace<BoundTypePack>(returnList);
@@ -733,17 +731,17 @@ static bool dcrMagicFunctionFind(MagicFunctionCallContext context)
             return false;
     }
 
-    context.solver->unify(context.solver->rootScope, context.callSite->location, params[0], builtinTypes->stringType);
+    context.solver->unify(context.constraint, params[0], builtinTypes->stringType);
 
     const TypeId optionalNumber = arena->addType(UnionType{{builtinTypes->nilType, builtinTypes->numberType}});
     const TypeId optionalBoolean = arena->addType(UnionType{{builtinTypes->nilType, builtinTypes->booleanType}});
 
     size_t initIndex = context.callSite->self ? 1 : 2;
     if (params.size() >= 3 && context.callSite->args.size > initIndex)
-        context.solver->unify(context.solver->rootScope, context.callSite->location, params[2], optionalNumber);
+        context.solver->unify(context.constraint, params[2], optionalNumber);
 
     if (params.size() == 4 && context.callSite->args.size > plainIndex)
-        context.solver->unify(context.solver->rootScope, context.callSite->location, params[3], optionalBoolean);
+        context.solver->unify(context.constraint, params[3], optionalBoolean);
 
     returnTypes.insert(returnTypes.begin(), {optionalNumber, optionalNumber});
 
@@ -774,153 +772,87 @@ TypeId makeStringMetatable(NotNull<BuiltinTypes> builtinTypes)
     const TypePackId numberVariadicList = arena->addTypePack(TypePackVar{VariadicTypePack{numberType}});
 
 
-    if (FFlag::LuauMakeStringMethodsChecked)
-    {
-        FunctionType formatFTV{arena->addTypePack(TypePack{{stringType}, variadicTailPack}), oneStringPack};
-        formatFTV.magicFunction = &magicFunctionFormat;
-        formatFTV.isCheckedFunction = true;
-        const TypeId formatFn = arena->addType(formatFTV);
-        attachDcrMagicFunction(formatFn, dcrMagicFunctionFormat);
+    FunctionType formatFTV{arena->addTypePack(TypePack{{stringType}, variadicTailPack}), oneStringPack};
+    formatFTV.magicFunction = &magicFunctionFormat;
+    formatFTV.isCheckedFunction = true;
+    const TypeId formatFn = arena->addType(formatFTV);
+    attachDcrMagicFunction(formatFn, dcrMagicFunctionFormat);
 
 
-        const TypeId stringToStringType = makeFunction(*arena, std::nullopt, {}, {}, {stringType}, {}, {stringType}, /* checked */ true);
+    const TypeId stringToStringType = makeFunction(*arena, std::nullopt, {}, {}, {stringType}, {}, {stringType}, /* checked */ true);
 
-        const TypeId replArgType = arena->addType(
-            UnionType{{stringType, arena->addType(TableType({}, TableIndexer(stringType, stringType), TypeLevel{}, TableState::Generic)),
-                makeFunction(*arena, std::nullopt, {}, {}, {stringType}, {}, {stringType}, /* checked */ false)}});
-        const TypeId gsubFunc =
-            makeFunction(*arena, stringType, {}, {}, {stringType, replArgType, optionalNumber}, {}, {stringType, numberType}, /* checked */ false);
-        const TypeId gmatchFunc = makeFunction(
-            *arena, stringType, {}, {}, {stringType}, {}, {arena->addType(FunctionType{emptyPack, stringVariadicList})}, /* checked */ true);
-        attachMagicFunction(gmatchFunc, magicFunctionGmatch);
-        attachDcrMagicFunction(gmatchFunc, dcrMagicFunctionGmatch);
+    const TypeId replArgType =
+        arena->addType(UnionType{{stringType, arena->addType(TableType({}, TableIndexer(stringType, stringType), TypeLevel{}, TableState::Generic)),
+            makeFunction(*arena, std::nullopt, {}, {}, {stringType}, {}, {stringType}, /* checked */ false)}});
+    const TypeId gsubFunc =
+        makeFunction(*arena, stringType, {}, {}, {stringType, replArgType, optionalNumber}, {}, {stringType, numberType}, /* checked */ false);
+    const TypeId gmatchFunc =
+        makeFunction(*arena, stringType, {}, {}, {stringType}, {}, {arena->addType(FunctionType{emptyPack, stringVariadicList})}, /* checked */ true);
+    attachMagicFunction(gmatchFunc, magicFunctionGmatch);
+    attachDcrMagicFunction(gmatchFunc, dcrMagicFunctionGmatch);
 
-        FunctionType matchFuncTy{
-            arena->addTypePack({stringType, stringType, optionalNumber}), arena->addTypePack(TypePackVar{VariadicTypePack{stringType}})};
-        matchFuncTy.isCheckedFunction = true;
-        const TypeId matchFunc = arena->addType(matchFuncTy);
-        attachMagicFunction(matchFunc, magicFunctionMatch);
-        attachDcrMagicFunction(matchFunc, dcrMagicFunctionMatch);
+    FunctionType matchFuncTy{
+        arena->addTypePack({stringType, stringType, optionalNumber}), arena->addTypePack(TypePackVar{VariadicTypePack{stringType}})};
+    matchFuncTy.isCheckedFunction = true;
+    const TypeId matchFunc = arena->addType(matchFuncTy);
+    attachMagicFunction(matchFunc, magicFunctionMatch);
+    attachDcrMagicFunction(matchFunc, dcrMagicFunctionMatch);
 
-        FunctionType findFuncTy{arena->addTypePack({stringType, stringType, optionalNumber, optionalBoolean}),
-            arena->addTypePack(TypePack{{optionalNumber, optionalNumber}, stringVariadicList})};
-        findFuncTy.isCheckedFunction = true;
-        const TypeId findFunc = arena->addType(findFuncTy);
-        attachMagicFunction(findFunc, magicFunctionFind);
-        attachDcrMagicFunction(findFunc, dcrMagicFunctionFind);
+    FunctionType findFuncTy{arena->addTypePack({stringType, stringType, optionalNumber, optionalBoolean}),
+        arena->addTypePack(TypePack{{optionalNumber, optionalNumber}, stringVariadicList})};
+    findFuncTy.isCheckedFunction = true;
+    const TypeId findFunc = arena->addType(findFuncTy);
+    attachMagicFunction(findFunc, magicFunctionFind);
+    attachDcrMagicFunction(findFunc, dcrMagicFunctionFind);
 
-        // string.byte : string -> number? -> number? -> ...number
-        FunctionType stringDotByte{arena->addTypePack({stringType, optionalNumber, optionalNumber}), numberVariadicList};
-        stringDotByte.isCheckedFunction = true;
+    // string.byte : string -> number? -> number? -> ...number
+    FunctionType stringDotByte{arena->addTypePack({stringType, optionalNumber, optionalNumber}), numberVariadicList};
+    stringDotByte.isCheckedFunction = true;
 
-        // string.char : .... number -> string
-        FunctionType stringDotChar{numberVariadicList, arena->addTypePack({stringType})};
-        stringDotChar.isCheckedFunction = true;
+    // string.char : .... number -> string
+    FunctionType stringDotChar{numberVariadicList, arena->addTypePack({stringType})};
+    stringDotChar.isCheckedFunction = true;
 
-        // string.unpack : string -> string -> number? -> ...any
-        FunctionType stringDotUnpack{
-            arena->addTypePack(TypePack{{stringType, stringType, optionalNumber}}),
-            variadicTailPack,
-        };
-        stringDotUnpack.isCheckedFunction = true;
+    // string.unpack : string -> string -> number? -> ...any
+    FunctionType stringDotUnpack{
+        arena->addTypePack(TypePack{{stringType, stringType, optionalNumber}}),
+        variadicTailPack,
+    };
+    stringDotUnpack.isCheckedFunction = true;
 
-        TableType::Props stringLib = {
-            {"byte", {arena->addType(stringDotByte)}},
-            {"char", {arena->addType(stringDotChar)}},
-            {"find", {findFunc}},
-            {"format", {formatFn}}, // FIXME
-            {"gmatch", {gmatchFunc}},
-            {"gsub", {gsubFunc}},
-            {"len", {makeFunction(*arena, stringType, {}, {}, {}, {}, {numberType}, /* checked */ true)}},
-            {"lower", {stringToStringType}},
-            {"match", {matchFunc}},
-            {"rep", {makeFunction(*arena, stringType, {}, {}, {numberType}, {}, {stringType}, /* checked */ true)}},
-            {"reverse", {stringToStringType}},
-            {"sub", {makeFunction(*arena, stringType, {}, {}, {numberType, optionalNumber}, {}, {stringType}, /* checked */ true)}},
-            {"upper", {stringToStringType}},
-            {"split", {makeFunction(*arena, stringType, {}, {}, {optionalString}, {},
-                          {arena->addType(TableType{{}, TableIndexer{numberType, stringType}, TypeLevel{}, TableState::Sealed})},
-                          /* checked */ true)}},
-            {"pack", {arena->addType(FunctionType{
-                         arena->addTypePack(TypePack{{stringType}, variadicTailPack}),
-                         oneStringPack,
-                     })}},
-            {"packsize", {makeFunction(*arena, stringType, {}, {}, {}, {}, {numberType}, /* checked */ true)}},
-            {"unpack", {arena->addType(stringDotUnpack)}},
-        };
-        assignPropDocumentationSymbols(stringLib, "@luau/global/string");
+    TableType::Props stringLib = {
+        {"byte", {arena->addType(stringDotByte)}},
+        {"char", {arena->addType(stringDotChar)}},
+        {"find", {findFunc}},
+        {"format", {formatFn}}, // FIXME
+        {"gmatch", {gmatchFunc}},
+        {"gsub", {gsubFunc}},
+        {"len", {makeFunction(*arena, stringType, {}, {}, {}, {}, {numberType}, /* checked */ true)}},
+        {"lower", {stringToStringType}},
+        {"match", {matchFunc}},
+        {"rep", {makeFunction(*arena, stringType, {}, {}, {numberType}, {}, {stringType}, /* checked */ true)}},
+        {"reverse", {stringToStringType}},
+        {"sub", {makeFunction(*arena, stringType, {}, {}, {numberType, optionalNumber}, {}, {stringType}, /* checked */ true)}},
+        {"upper", {stringToStringType}},
+        {"split", {makeFunction(*arena, stringType, {}, {}, {optionalString}, {},
+                      {arena->addType(TableType{{}, TableIndexer{numberType, stringType}, TypeLevel{}, TableState::Sealed})},
+                      /* checked */ true)}},
+        {"pack", {arena->addType(FunctionType{
+                     arena->addTypePack(TypePack{{stringType}, variadicTailPack}),
+                     oneStringPack,
+                 })}},
+        {"packsize", {makeFunction(*arena, stringType, {}, {}, {}, {}, {numberType}, /* checked */ true)}},
+        {"unpack", {arena->addType(stringDotUnpack)}},
+    };
 
-        TypeId tableType = arena->addType(TableType{std::move(stringLib), std::nullopt, TypeLevel{}, TableState::Sealed});
+    assignPropDocumentationSymbols(stringLib, "@luau/global/string");
 
-        if (TableType* ttv = getMutable<TableType>(tableType))
-            ttv->name = "typeof(string)";
+    TypeId tableType = arena->addType(TableType{std::move(stringLib), std::nullopt, TypeLevel{}, TableState::Sealed});
 
-        return arena->addType(TableType{{{{"__index", {tableType}}}}, std::nullopt, TypeLevel{}, TableState::Sealed});
-    }
-    else
-    {
-        FunctionType formatFTV{arena->addTypePack(TypePack{{stringType}, variadicTailPack}), oneStringPack};
-        formatFTV.magicFunction = &magicFunctionFormat;
-        const TypeId formatFn = arena->addType(formatFTV);
-        attachDcrMagicFunction(formatFn, dcrMagicFunctionFormat);
+    if (TableType* ttv = getMutable<TableType>(tableType))
+        ttv->name = "typeof(string)";
 
-        const TypeId stringToStringType = makeFunction(*arena, std::nullopt, {}, {}, {stringType}, {}, {stringType});
-
-        const TypeId replArgType = arena->addType(
-            UnionType{{stringType, arena->addType(TableType({}, TableIndexer(stringType, stringType), TypeLevel{}, TableState::Generic)),
-                makeFunction(*arena, std::nullopt, {}, {}, {stringType}, {}, {stringType})}});
-        const TypeId gsubFunc = makeFunction(*arena, stringType, {}, {}, {stringType, replArgType, optionalNumber}, {}, {stringType, numberType});
-        const TypeId gmatchFunc =
-            makeFunction(*arena, stringType, {}, {}, {stringType}, {}, {arena->addType(FunctionType{emptyPack, stringVariadicList})});
-        attachMagicFunction(gmatchFunc, magicFunctionGmatch);
-        attachDcrMagicFunction(gmatchFunc, dcrMagicFunctionGmatch);
-
-        const TypeId matchFunc = arena->addType(FunctionType{
-            arena->addTypePack({stringType, stringType, optionalNumber}), arena->addTypePack(TypePackVar{VariadicTypePack{stringType}})});
-        attachMagicFunction(matchFunc, magicFunctionMatch);
-        attachDcrMagicFunction(matchFunc, dcrMagicFunctionMatch);
-
-        const TypeId findFunc = arena->addType(FunctionType{arena->addTypePack({stringType, stringType, optionalNumber, optionalBoolean}),
-            arena->addTypePack(TypePack{{optionalNumber, optionalNumber}, stringVariadicList})});
-        attachMagicFunction(findFunc, magicFunctionFind);
-        attachDcrMagicFunction(findFunc, dcrMagicFunctionFind);
-
-        TableType::Props stringLib = {
-            {"byte", {arena->addType(FunctionType{arena->addTypePack({stringType, optionalNumber, optionalNumber}), numberVariadicList})}},
-            {"char", {arena->addType(FunctionType{numberVariadicList, arena->addTypePack({stringType})})}},
-            {"find", {findFunc}},
-            {"format", {formatFn}}, // FIXME
-            {"gmatch", {gmatchFunc}},
-            {"gsub", {gsubFunc}},
-            {"len", {makeFunction(*arena, stringType, {}, {}, {}, {}, {numberType})}},
-            {"lower", {stringToStringType}},
-            {"match", {matchFunc}},
-            {"rep", {makeFunction(*arena, stringType, {}, {}, {numberType}, {}, {stringType})}},
-            {"reverse", {stringToStringType}},
-            {"sub", {makeFunction(*arena, stringType, {}, {}, {numberType, optionalNumber}, {}, {stringType})}},
-            {"upper", {stringToStringType}},
-            {"split", {makeFunction(*arena, stringType, {}, {}, {optionalString}, {},
-                          {arena->addType(TableType{{}, TableIndexer{numberType, stringType}, TypeLevel{}, TableState::Sealed})})}},
-            {"pack", {arena->addType(FunctionType{
-                         arena->addTypePack(TypePack{{stringType}, variadicTailPack}),
-                         oneStringPack,
-                     })}},
-            {"packsize", {makeFunction(*arena, stringType, {}, {}, {}, {}, {numberType})}},
-            {"unpack", {arena->addType(FunctionType{
-                           arena->addTypePack(TypePack{{stringType, stringType, optionalNumber}}),
-                           variadicTailPack,
-                       })}},
-        };
-
-        assignPropDocumentationSymbols(stringLib, "@luau/global/string");
-
-        TypeId tableType = arena->addType(TableType{std::move(stringLib), std::nullopt, TypeLevel{}, TableState::Sealed});
-
-        if (TableType* ttv = getMutable<TableType>(tableType))
-            ttv->name = "typeof(string)";
-
-        return arena->addType(TableType{{{{"__index", {tableType}}}}, std::nullopt, TypeLevel{}, TableState::Sealed});
-    }
+    return arena->addType(TableType{{{{"__index", {tableType}}}}, std::nullopt, TypeLevel{}, TableState::Sealed});
 }
 
 static std::optional<WithPredicate<TypePackId>> magicFunctionSelect(
@@ -1067,7 +999,7 @@ static std::optional<WithPredicate<TypePackId>> magicFunctionSetMetaTable(
     else if (get<AnyType>(target) || get<ErrorType>(target) || isTableIntersection(target))
     {
     }
-    else if (FFlag::LuauSetMetatableOnUnionsOfTables && isTableUnion(target))
+    else if (isTableUnion(target))
     {
         const UnionType* ut = get<UnionType>(target);
         LUAU_ASSERT(ut);

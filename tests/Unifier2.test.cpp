@@ -76,13 +76,13 @@ TEST_CASE_FIXTURE(Unifier2Fixture, "T <: U")
 
     CHECK(u2.unify(left, right));
 
-    CHECK("'a" == toString(left));
-    CHECK("'a" == toString(right));
+    CHECK("t1 where t1 = ('a <: (t1 <: 'b))" == toString(left));
+    CHECK("t1 where t1 = (('a <: t1) <: 'b)" == toString(right));
 
     CHECK("never" == toString(freeLeft->lowerBound));
-    CHECK("unknown" == toString(freeLeft->upperBound));
+    CHECK("t1 where t1 = (('a <: t1) <: 'b)" == toString(freeLeft->upperBound));
 
-    CHECK("never" == toString(freeRight->lowerBound));
+    CHECK("t1 where t1 = ('a <: (t1 <: 'b))" == toString(freeRight->lowerBound));
     CHECK("unknown" == toString(freeRight->upperBound));
 }
 
@@ -130,69 +130,6 @@ TEST_CASE_FIXTURE(Unifier2Fixture, "unify_binds_free_supertype_tail_pack")
     u2.unify(numberPack, freeAndFree);
 
     CHECK("(number <: 'a)" == toString(freeAndFree));
-}
-
-TEST_CASE_FIXTURE(Unifier2Fixture, "generalize_a_type_that_is_bounded_by_another_generalizable_type")
-{
-    auto [t1, ft1] = freshType();
-    auto [t2, ft2] = freshType();
-
-    // t2 <: t1 <: unknown
-    // unknown <: t2 <: t1
-
-    ft1->lowerBound = t2;
-    ft2->upperBound = t1;
-    ft2->lowerBound = builtinTypes.unknownType;
-
-    auto t2generalized = u2.generalize(t2);
-    REQUIRE(t2generalized);
-
-    CHECK(follow(t1) == follow(t2));
-
-    auto t1generalized = u2.generalize(t1);
-    REQUIRE(t1generalized);
-
-    CHECK(builtinTypes.unknownType == follow(t1));
-    CHECK(builtinTypes.unknownType == follow(t2));
-}
-
-// Same as generalize_a_type_that_is_bounded_by_another_generalizable_type
-// except that we generalize the types in the opposite order
-TEST_CASE_FIXTURE(Unifier2Fixture, "generalize_a_type_that_is_bounded_by_another_generalizable_type_in_reverse_order")
-{
-    auto [t1, ft1] = freshType();
-    auto [t2, ft2] = freshType();
-
-    // t2 <: t1 <: unknown
-    // unknown <: t2 <: t1
-
-    ft1->lowerBound = t2;
-    ft2->upperBound = t1;
-    ft2->lowerBound = builtinTypes.unknownType;
-
-    auto t1generalized = u2.generalize(t1);
-    REQUIRE(t1generalized);
-
-    CHECK(follow(t1) == follow(t2));
-
-    auto t2generalized = u2.generalize(t2);
-    REQUIRE(t2generalized);
-
-    CHECK(builtinTypes.unknownType == follow(t1));
-    CHECK(builtinTypes.unknownType == follow(t2));
-}
-
-TEST_CASE_FIXTURE(Unifier2Fixture, "dont_traverse_into_class_types_when_generalizing")
-{
-    auto [propTy, _] = freshType();
-
-    TypeId cursedClass = arena.addType(ClassType{"Cursed", {{"oh_no", Property::readonly(propTy)}}, std::nullopt, std::nullopt, {}, {}, ""});
-
-    auto genClass = u2.generalize(cursedClass);
-    REQUIRE(genClass);
-
-    auto genPropTy = get<ClassType>(*genClass)->props.at("oh_no").readTy;
-    CHECK(is<FreeType>(*genPropTy));
 }
 
 TEST_SUITE_END();

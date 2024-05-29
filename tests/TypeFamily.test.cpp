@@ -24,7 +24,7 @@ struct FamilyFixture : Fixture
     {
         swapFamily = TypeFamily{/* name */ "Swap",
             /* reducer */
-            [](TypeId instance, std::vector<TypeId> tys, std::vector<TypePackId> tps,
+            [](TypeId instance, NotNull<TypeFamilyQueue> queue, const std::vector<TypeId>& tys, const std::vector<TypePackId>& tps,
                 NotNull<TypeFamilyContext> ctx) -> TypeFamilyReductionResult<TypeId> {
                 LUAU_ASSERT(tys.size() == 1);
                 TypeId param = follow(tys.at(0));
@@ -218,6 +218,62 @@ TEST_CASE_FIXTURE(Fixture, "add_family_at_work")
     CHECK(toString(result.errors[1]) == "Type family instance Add<string, number> is uninhabited");
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "cyclic_add_family_at_work")
+{
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
+    CheckResult result = check(R"(
+        type T = add<number | T, number>
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK(toString(requireTypeAlias("T")) == "number");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "mul_family_with_union_of_multiplicatives")
+{
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
+    loadDefinition(R"(
+        declare class Vec2
+            function __mul(self, rhs: number): Vec2
+        end
+
+        declare class Vec3
+            function __mul(self, rhs: number): Vec3
+        end
+    )");
+
+    CheckResult result = check(R"(
+        type T = mul<Vec2 | Vec3, number>
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK(toString(requireTypeAlias("T")) == "Vec2 | Vec3");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "mul_family_with_union_of_multiplicatives_2")
+{
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
+    loadDefinition(R"(
+        declare class Vec3
+            function __mul(self, rhs: number): Vec3
+            function __mul(self, rhs: Vec3): Vec3
+        end
+    )");
+
+    CheckResult result = check(R"(
+        type T = mul<number | Vec3, Vec3>
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK(toString(requireTypeAlias("T")) == "Vec3");
+}
+
 TEST_CASE_FIXTURE(Fixture, "internal_families_raise_errors")
 {
     if (!FFlag::DebugLuauDeferredConstraintResolution)
@@ -335,8 +391,8 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_family_errors_if_it_has_nontable_
 
     // FIXME(CLI-95289): we should actually only report the type family being uninhabited error at its first use, I think?
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK(toString(result.errors[0]) == "Type family instance keyof<MyObject | boolean> is uninhabited");
-    CHECK(toString(result.errors[1]) == "Type family instance keyof<MyObject | boolean> is uninhabited");
+    CHECK(toString(result.errors[0]) == "Type 'MyObject | boolean' does not have keys, so 'keyof<MyObject | boolean>' is invalid");
+    CHECK(toString(result.errors[1]) == "Type 'MyObject | boolean' does not have keys, so 'keyof<MyObject | boolean>' is invalid");
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_family_string_indexer")
@@ -461,8 +517,8 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_family_errors_if_it_has_nontab
 
     // FIXME(CLI-95289): we should actually only report the type family being uninhabited error at its first use, I think?
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK(toString(result.errors[0]) == "Type family instance rawkeyof<MyObject | boolean> is uninhabited");
-    CHECK(toString(result.errors[1]) == "Type family instance rawkeyof<MyObject | boolean> is uninhabited");
+    CHECK(toString(result.errors[0]) == "Type 'MyObject | boolean' does not have keys, so 'rawkeyof<MyObject | boolean>' is invalid");
+    CHECK(toString(result.errors[1]) == "Type 'MyObject | boolean' does not have keys, so 'rawkeyof<MyObject | boolean>' is invalid");
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_family_common_subset_if_union_of_differing_tables")
@@ -534,8 +590,8 @@ TEST_CASE_FIXTURE(ClassFixture, "keyof_type_family_errors_if_it_has_nonclass_par
 
     // FIXME(CLI-95289): we should actually only report the type family being uninhabited error at its first use, I think?
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK(toString(result.errors[0]) == "Type family instance keyof<BaseClass | boolean> is uninhabited");
-    CHECK(toString(result.errors[1]) == "Type family instance keyof<BaseClass | boolean> is uninhabited");
+    CHECK(toString(result.errors[0]) == "Type 'BaseClass | boolean' does not have keys, so 'keyof<BaseClass | boolean>' is invalid");
+    CHECK(toString(result.errors[1]) == "Type 'BaseClass | boolean' does not have keys, so 'keyof<BaseClass | boolean>' is invalid");
 }
 
 TEST_CASE_FIXTURE(ClassFixture, "keyof_type_family_common_subset_if_union_of_differing_classes")
@@ -550,6 +606,21 @@ TEST_CASE_FIXTURE(ClassFixture, "keyof_type_family_common_subset_if_union_of_dif
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(ClassFixture, "binary_type_family_works_with_default_argument")
+{
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
+    CheckResult result = check(R"(
+        type result = mul<number>
+
+        local function thunk(): result return 5 * 4 end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK("() -> number" == toString(requireType("thunk")));
 }
 
 TEST_CASE_FIXTURE(ClassFixture, "vector2_multiply_is_overloaded")
@@ -628,6 +699,21 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_oss_crash_gh1161")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK(get<FunctionExitsWithoutReturning>(result.errors[0]));
+}
+
+TEST_CASE_FIXTURE(FamilyFixture, "fuzzer_numeric_binop_doesnt_assert_on_generalizeFreeType")
+{
+    CheckResult result = check(R"(
+Module 'l0':
+local _ = (67108864)(_ >= _).insert
+do end
+do end
+_(...,_(_,_(_()),_()))
+(67108864)()()
+_(_ ~= _ // _,l0)(_(_({n0,})),_(_),_)
+_(setmetatable(_,{[...]=_,}))
+
+)");
 }
 
 TEST_SUITE_END();

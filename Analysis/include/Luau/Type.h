@@ -33,6 +33,7 @@ struct Scope;
 using ScopePtr = std::shared_ptr<Scope>;
 
 struct TypeFamily;
+struct Constraint;
 
 /**
  * There are three kinds of type variables:
@@ -144,6 +145,14 @@ struct BlockedType
 {
     BlockedType();
     int index;
+
+    Constraint* getOwner() const;
+    void setOwner(Constraint* newOwner);
+
+private:
+    // The constraint that is intended to unblock this type. Other constraints
+    // should block on this constraint if present.
+    Constraint* owner = nullptr;
 };
 
 struct PrimitiveType
@@ -290,6 +299,7 @@ using MagicFunction = std::function<std::optional<WithPredicate<TypePackId>>(
 struct MagicFunctionCallContext
 {
     NotNull<struct ConstraintSolver> solver;
+    NotNull<const Constraint> constraint;
     const class AstExprCall* callSite;
     TypePackId arguments;
     TypePackId result;
@@ -413,6 +423,9 @@ struct Property
     // TODO: Kill once we don't have non-RWP.
     TypeId type() const;
     void setType(TypeId ty);
+
+    // Sets the write type of this property to the read type.
+    void makeShared();
 
     bool isShared() const;
     bool isReadOnly() const;
@@ -539,6 +552,27 @@ struct TypeFamilyInstanceType
 
     std::vector<TypeId> typeArguments;
     std::vector<TypePackId> packArguments;
+
+    TypeFamilyInstanceType(NotNull<const TypeFamily> family, std::vector<TypeId> typeArguments, std::vector<TypePackId> packArguments)
+        : family(family)
+        , typeArguments(typeArguments)
+        , packArguments(packArguments)
+    {
+    }
+
+    TypeFamilyInstanceType(const TypeFamily& family, std::vector<TypeId> typeArguments)
+        : family{&family}
+        , typeArguments(typeArguments)
+        , packArguments{}
+    {
+    }
+
+    TypeFamilyInstanceType(const TypeFamily& family, std::vector<TypeId> typeArguments, std::vector<TypePackId> packArguments)
+        : family{&family}
+        , typeArguments(typeArguments)
+        , packArguments(packArguments)
+    {
+    }
 };
 
 /** Represents a pending type alias instantiation.
@@ -1068,5 +1102,8 @@ LUAU_NOINLINE T* emplaceType(Type* ty, Args&&... args)
 {
     return &ty->ty.emplace<T>(std::forward<Args>(args)...);
 }
+
+template<>
+LUAU_NOINLINE Unifiable::Bound<TypeId>* emplaceType<BoundType>(Type* ty, TypeId& tyArg);
 
 } // namespace Luau

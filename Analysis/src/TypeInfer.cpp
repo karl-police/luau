@@ -3,12 +3,10 @@
 
 #include "Luau/ApplyTypeFunction.h"
 #include "Luau/Cancellation.h"
-#include "Luau/Clone.h"
 #include "Luau/Common.h"
 #include "Luau/Instantiation.h"
 #include "Luau/ModuleResolver.h"
 #include "Luau/Normalize.h"
-#include "Luau/Parser.h"
 #include "Luau/Quantify.h"
 #include "Luau/RecursionCounter.h"
 #include "Luau/Scope.h"
@@ -35,8 +33,8 @@ LUAU_FASTFLAG(LuauKnowsTheDataModel3)
 LUAU_FASTFLAGVARIABLE(DebugLuauFreezeDuringUnification, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauSharedSelf, false)
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
+LUAU_FASTFLAGVARIABLE(LuauMetatableInstantiationCloneCheck, false)
 LUAU_FASTFLAGVARIABLE(LuauTinyControlFlowAnalysis, false)
-LUAU_FASTFLAGVARIABLE(LuauLoopControlFlowAnalysis, false)
 LUAU_FASTFLAGVARIABLE(LuauAlwaysCommitInferencesOfFunctionCalls, false)
 LUAU_FASTFLAGVARIABLE(LuauRemoveBadRelationalOperatorWarning, false)
 LUAU_FASTFLAGVARIABLE(LuauForbidAliasNamedTypeof, false)
@@ -351,9 +349,9 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStat& program)
     else if (auto repeat = program.as<AstStatRepeat>())
         return check(scope, *repeat);
     else if (program.is<AstStatBreak>())
-        return FFlag::LuauLoopControlFlowAnalysis ? ControlFlow::Breaks : ControlFlow::None;
+        return FFlag::LuauTinyControlFlowAnalysis ? ControlFlow::Breaks : ControlFlow::None;
     else if (program.is<AstStatContinue>())
-        return FFlag::LuauLoopControlFlowAnalysis ? ControlFlow::Continues : ControlFlow::None;
+        return FFlag::LuauTinyControlFlowAnalysis ? ControlFlow::Continues : ControlFlow::None;
     else if (auto return_ = program.as<AstStatReturn>())
         return check(scope, *return_);
     else if (auto expr = program.as<AstStatExpr>())
@@ -756,7 +754,7 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatIf& statement
         else if (thencf == ControlFlow::None && elsecf != ControlFlow::None)
             scope->inheritRefinements(thenScope);
 
-        if (FFlag::LuauLoopControlFlowAnalysis && thencf == elsecf)
+        if (FFlag::LuauTinyControlFlowAnalysis && thencf == elsecf)
             return thencf;
         else if (matches(thencf, ControlFlow::Returns | ControlFlow::Throws) && matches(elsecf, ControlFlow::Returns | ControlFlow::Throws))
             return ControlFlow::Returns;
@@ -2648,12 +2646,27 @@ static std::optional<bool> areEqComparable(NotNull<TypeArena> arena, NotNull<Nor
     if (isExempt(a) || isExempt(b))
         return true;
 
+    NormalizationResult nr;
+
     TypeId c = arena->addType(IntersectionType{{a, b}});
-    const NormalizedType* n = normalizer->normalize(c);
+    std::shared_ptr<const NormalizedType> n = normalizer->normalize(c);
     if (!n)
         return std::nullopt;
 
-    return normalizer->isInhabited(n);
+    nr = normalizer->isInhabited(n.get());
+
+    switch (nr)
+    {
+    case NormalizationResult::HitLimits:
+        return std::nullopt;
+    case NormalizationResult::False:
+        return false;
+    case NormalizationResult::True:
+        return true;
+    }
+
+    // n.b. msvc can never figure this stuff out.
+    LUAU_UNREACHABLE();
 }
 
 TypeId TypeChecker::checkRelationalOperation(
@@ -5607,7 +5620,8 @@ TypeId TypeChecker::instantiateTypeFun(const ScopePtr& scope, const TypeFun& tf,
     TypeId instantiated = *maybeInstantiated;
 
     TypeId target = follow(instantiated);
-    bool needsClone = follow(tf.type) == target;
+    const TableType* tfTable = FFlag::LuauMetatableInstantiationCloneCheck ? getTableType(tf.type) : nullptr;
+    bool needsClone = follow(tf.type) == target || (FFlag::LuauMetatableInstantiationCloneCheck && tfTable != nullptr && tfTable == getTableType(target));
     bool shouldMutate = getTableType(tf.type);
     TableType* ttv = getMutableTableType(target);
 

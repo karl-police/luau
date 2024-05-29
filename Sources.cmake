@@ -86,12 +86,14 @@ target_sources(Luau.CodeGen PRIVATE
     CodeGen/include/Luau/IrUtils.h
     CodeGen/include/Luau/IrVisitUseDef.h
     CodeGen/include/Luau/Label.h
+    CodeGen/include/Luau/NativeProtoExecData.h
     CodeGen/include/Luau/OperandX64.h
     CodeGen/include/Luau/OptimizeConstProp.h
     CodeGen/include/Luau/OptimizeDeadStore.h
     CodeGen/include/Luau/OptimizeFinalX64.h
     CodeGen/include/Luau/RegisterA64.h
     CodeGen/include/Luau/RegisterX64.h
+    CodeGen/include/Luau/SharedCodeAllocator.h
     CodeGen/include/Luau/UnwindBuilder.h
     CodeGen/include/Luau/UnwindBuilderDwarf2.h
     CodeGen/include/Luau/UnwindBuilderWin.h
@@ -105,6 +107,7 @@ target_sources(Luau.CodeGen PRIVATE
     CodeGen/src/CodeBlockUnwind.cpp
     CodeGen/src/CodeGen.cpp
     CodeGen/src/CodeGenAssembly.cpp
+    CodeGen/src/CodeGenContext.cpp
     CodeGen/src/CodeGenUtils.cpp
     CodeGen/src/CodeGenA64.cpp
     CodeGen/src/CodeGenX64.cpp
@@ -124,6 +127,7 @@ target_sources(Luau.CodeGen PRIVATE
     CodeGen/src/IrUtils.cpp
     CodeGen/src/IrValueLocationTracking.cpp
     CodeGen/src/lcodegen.cpp
+    CodeGen/src/NativeProtoExecData.cpp
     CodeGen/src/NativeState.cpp
     CodeGen/src/OptimizeConstProp.cpp
     CodeGen/src/OptimizeDeadStore.cpp
@@ -132,9 +136,11 @@ target_sources(Luau.CodeGen PRIVATE
     CodeGen/src/UnwindBuilderWin.cpp
     CodeGen/src/BytecodeAnalysis.cpp
     CodeGen/src/BytecodeSummary.cpp
+    CodeGen/src/SharedCodeAllocator.cpp
 
     CodeGen/src/BitUtils.h
     CodeGen/src/ByteUtils.h
+    CodeGen/src/CodeGenContext.h
     CodeGen/src/CodeGenLower.h
     CodeGen/src/CodeGenUtils.h
     CodeGen/src/CodeGenA64.h
@@ -175,6 +181,7 @@ target_sources(Luau.Analysis PRIVATE
     Analysis/include/Luau/Error.h
     Analysis/include/Luau/FileResolver.h
     Analysis/include/Luau/Frontend.h
+    Analysis/include/Luau/Generalization.h
     Analysis/include/Luau/GlobalTypes.h
     Analysis/include/Luau/InsertionOrderedMap.h
     Analysis/include/Luau/Instantiation.h
@@ -200,6 +207,7 @@ target_sources(Luau.Analysis PRIVATE
     Analysis/include/Luau/Substitution.h
     Analysis/include/Luau/Subtyping.h
     Analysis/include/Luau/Symbol.h
+    Analysis/include/Luau/TableLiteralInference.h
     Analysis/include/Luau/ToDot.h
     Analysis/include/Luau/TopoSortStatements.h
     Analysis/include/Luau/ToString.h
@@ -244,6 +252,7 @@ target_sources(Luau.Analysis PRIVATE
     Analysis/src/EmbeddedBuiltinDefinitions.cpp
     Analysis/src/Error.cpp
     Analysis/src/Frontend.cpp
+    Analysis/src/Generalization.cpp
     Analysis/src/GlobalTypes.cpp
     Analysis/src/Instantiation.cpp
     Analysis/src/Instantiation2.cpp
@@ -263,6 +272,7 @@ target_sources(Luau.Analysis PRIVATE
     Analysis/src/Substitution.cpp
     Analysis/src/Subtyping.cpp
     Analysis/src/Symbol.cpp
+    Analysis/src/TableLiteralInference.cpp
     Analysis/src/ToDot.cpp
     Analysis/src/TopoSortStatements.cpp
     Analysis/src/ToString.cpp
@@ -349,15 +359,19 @@ target_sources(isocline PRIVATE
     extern/isocline/src/isocline.c
 )
 
+# Common sources shared between all CLI apps
+target_sources(Luau.CLI.lib PRIVATE
+    CLI/FileUtils.cpp
+    CLI/Flags.cpp
+    CLI/Flags.h
+    CLI/FileUtils.h
+)
+
 if(TARGET Luau.Repl.CLI)
     # Luau.Repl.CLI Sources
     target_sources(Luau.Repl.CLI PRIVATE
         CLI/Coverage.h
         CLI/Coverage.cpp
-        CLI/FileUtils.h
-        CLI/FileUtils.cpp
-        CLI/Flags.h
-        CLI/Flags.cpp
         CLI/Profiler.h
         CLI/Profiler.cpp
         CLI/Repl.cpp
@@ -368,10 +382,6 @@ endif()
 if(TARGET Luau.Analyze.CLI)
     # Luau.Analyze.CLI Sources
     target_sources(Luau.Analyze.CLI PRIVATE
-        CLI/FileUtils.h
-        CLI/FileUtils.cpp
-        CLI/Flags.h
-        CLI/Flags.cpp
         CLI/Analyze.cpp)
 endif()
 
@@ -379,8 +389,6 @@ if(TARGET Luau.Ast.CLI)
     # Luau.Ast.CLI Sources
     target_sources(Luau.Ast.CLI PRIVATE
         CLI/Ast.cpp
-        CLI/FileUtils.h
-        CLI/FileUtils.cpp
     )
 endif()
 
@@ -414,7 +422,9 @@ if(TARGET Luau.UnitTest)
         tests/Fixture.cpp
         tests/Fixture.h
         tests/Frontend.test.cpp
+        tests/Generalization.test.cpp
         tests/InsertionOrderedMap.test.cpp
+        tests/Instantiation2.test.cpp
         tests/IostreamOptional.h
         tests/IrBuilder.test.cpp
         tests/IrCallWrapperX64.test.cpp
@@ -486,8 +496,10 @@ if(TARGET Luau.Conformance)
     target_sources(Luau.Conformance PRIVATE
         tests/RegisterCallbacks.h
         tests/RegisterCallbacks.cpp
+        tests/ConformanceIrHooks.h
         tests/Conformance.test.cpp
         tests/IrLowering.test.cpp
+        tests/SharedCodeAllocator.test.cpp
         tests/main.cpp)
 endif()
 
@@ -496,10 +508,6 @@ if(TARGET Luau.CLI.Test)
     target_sources(Luau.CLI.Test PRIVATE
         CLI/Coverage.h
         CLI/Coverage.cpp
-        CLI/FileUtils.h
-        CLI/FileUtils.cpp
-        CLI/Flags.h
-        CLI/Flags.cpp
         CLI/Profiler.h
         CLI/Profiler.cpp
         CLI/Repl.cpp
@@ -522,28 +530,18 @@ if(TARGET Luau.Reduce.CLI)
     # Luau.Reduce.CLI Sources
     target_sources(Luau.Reduce.CLI PRIVATE
         CLI/Reduce.cpp
-        CLI/FileUtils.cpp
-        CLI/FileUtils.h
     )
 endif()
 
 if(TARGET Luau.Compile.CLI)
     # Luau.Compile.CLI Sources
     target_sources(Luau.Compile.CLI PRIVATE
-        CLI/FileUtils.h
-        CLI/FileUtils.cpp
-        CLI/Flags.h
-        CLI/Flags.cpp
         CLI/Compile.cpp)
 endif()
 
 if(TARGET Luau.Bytecode.CLI)
     # Luau.Bytecode.CLI Sources
     target_sources(Luau.Bytecode.CLI PRIVATE
-        CLI/FileUtils.h
-        CLI/FileUtils.cpp
-        CLI/Flags.h
-        CLI/Flags.cpp
         CLI/Bytecode.cpp)
 endif()
 
