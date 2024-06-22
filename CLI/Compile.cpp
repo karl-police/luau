@@ -51,6 +51,7 @@ struct GlobalOptions
     const char* vectorCtor = nullptr;
     const char* vectorType = nullptr;
     bool outputBytecode = false;
+    bool noRemarks = false;
 } globalOptions;
 
 static Luau::CompileOptions copts()
@@ -329,6 +330,11 @@ static bool compileFile(const char* name, CompileFormat format, Luau::CodeGen::A
         {
             bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code | Luau::BytecodeBuilder::Dump_Source | Luau::BytecodeBuilder::Dump_Locals |
                              Luau::BytecodeBuilder::Dump_Remarks | Luau::BytecodeBuilder::Dump_Types);
+
+            if (globalOptions.noRemarks) {
+                bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code);
+            }
+
             bcb.setDumpSource(*source);
         }
         else if (format == CompileFormat::Remarks)
@@ -451,6 +457,7 @@ static void displayHelp(const char* argv0)
     printf("  --vector-ctor=<name>: name of the function constructing a vector value.\n");
     printf("  --vector-type=<name>: name of the vector type.\n");
     printf("  --output: Will output the bytecode on the files.\n");
+    printf("  --no-remarks: Surpress remarks for --text.\n");
 }
 
 static int assertionHandler(const char* expr, const char* file, int line, const char* function)
@@ -603,6 +610,10 @@ int main(int argc, char** argv)
         else if (strcmp(argv[i], "--output") == 0)
         {
             globalOptions.outputBytecode = true;
+        }
+        else if (strcmp(argv[i], "--no-remarks") == 0)
+        {
+            globalOptions.noRemarks = true;
         }
         else if (argv[i][0] == '-' && argv[i][1] == '-' && getCompileFormat(argv[i] + 2))
         {
