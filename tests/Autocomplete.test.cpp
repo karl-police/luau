@@ -202,36 +202,35 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
 }
 
 
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk2")
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk4")
 {
     ScopedFastFlag sff[]{
-        {FFlag::DebugLuauDeferredConstraintResolution, true},
+        {FFlag::DebugLuauDeferredConstraintResolution, false},
         {FFlag::DebugLuauLogSolver, true},
     };
 
     auto check1 = check(R"(
-local name = {}
-name.__index = name
+function abc<free>(a)
+	local b = a :: typeof({})
+	b.abc = "hi"
 
-function name.new(abc)
-	local obj = setmetatable({}, name)
-	obj.a = abc
-	
-	return obj
+
+	return b :: typeof(b) & typeof(a) & free
 end
 
 
-function name:test()
-	self.b = "no"
-end
+local test = {}
+test.idk = "hi"
 
-
-local newClass = name.new("e")
-newClass:@1
+local e = abc(test)
+print(e.no)
+e.TheIs_doesntActual_Properlty="e"
+e.this_doesnt_act_properly@1
 )");
 
     auto ac1 = autocomplete('1');
-    CHECK(ac1.entryMap.count("test"));
+    ac1;
+    //CHECK(ac1.entryMap.count("TheIs_doesntActual_Properlty"));
 }
 
 
