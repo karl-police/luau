@@ -433,8 +433,52 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "varlist_declared_by_for_in_loop_should_be_fr
         end
     )");
 
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+        auto err = get<TypeMismatch>(result.errors[0]);
+        CHECK(err != nullptr);
+    }
+    else
+    {
+        LUAU_REQUIRE_NO_ERRORS(result);
+    }
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "iter_constraint_before_loop_body")
+{
+    CheckResult result = check(R"(
+        local T = {
+    	    fields = {},
+        }
+
+        function f()
+            for u, v in pairs(T.fields) do
+                T.fields[u] = nil
+            end
+        end
+    )");
+
     LUAU_REQUIRE_NO_ERRORS(result);
 }
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "rbxl_place_file_crash_for_wrong_constraints")
+{
+    CheckResult result = check(R"(
+local VehicleParameters = { 
+    -- These are default values in the case the package structure is broken
+	StrutSpringStiffnessFront = 28000,
+}
+
+local function updateFromConfiguration()
+	for property, value in pairs(VehicleParameters) do
+        VehicleParameters[property] = value
+	end
+end
+)");
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "properly_infer_iteratee_is_a_free_table")
 {
@@ -652,13 +696,7 @@ TEST_CASE_FIXTURE(Fixture, "loop_iter_basic")
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
         TypeId keyTy = requireType("key");
-
-        const UnionType* ut = get<UnionType>(keyTy);
-        REQUIRE(ut);
-
-        REQUIRE(ut->options.size() == 2);
-        CHECK_EQ(builtinTypes->nilType, ut->options[0]);
-        CHECK_EQ(*builtinTypes->numberType, *ut->options[1]);
+        CHECK("number?" == toString(keyTy));
     }
     else
         CHECK_EQ(*builtinTypes->numberType, *requireType("key"));
@@ -1133,6 +1171,16 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "iteration_preserves_error_suppression")
 
     CHECK("any" == toString(requireTypeAtPosition({3, 22})));
     CHECK("any" == toString(requireTypeAtPosition({3, 25})));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "tryDispatchIterableFunction_under_constrained_loop_should_not_assert")
+{
+    CheckResult result = check(R"(
+local function foo(Instance)
+	for _, Child in next, Instance:GetChildren() do
+	end
+end
+    )");
 }
 
 TEST_SUITE_END();

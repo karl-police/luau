@@ -56,6 +56,11 @@ bool isReferenceCountedType(const TypeId typ)
 
 DenseHashSet<TypeId> Constraint::getMaybeMutatedFreeTypes() const
 {
+    // For the purpose of this function and reference counting in general, we are only considering
+    // mutations that affect the _bounds_ of the free type, and not something that may bind the free
+    // type itself to a new type. As such, `ReduceConstraint` and `GeneralizationConstraint` have no
+    // contribution to the output set here.
+
     DenseHashSet<TypeId> types{{}};
     ReferenceCountInitializer rci{&types};
 
@@ -74,14 +79,10 @@ DenseHashSet<TypeId> Constraint::getMaybeMutatedFreeTypes() const
         rci.traverse(psc->subPack);
         rci.traverse(psc->superPack);
     }
-    else if (auto gc = get<GeneralizationConstraint>(*this))
-    {
-        rci.traverse(gc->generalizedType);
-        // `GeneralizationConstraints` should not mutate `sourceType` or `interiorTypes`.
-    }
     else if (auto itc = get<IterableConstraint>(*this))
     {
-        rci.traverse(itc->variables);
+        for (TypeId ty : itc->variables)
+            rci.traverse(ty);
         // `IterableConstraints` should not mutate `iterator`.
     }
     else if (auto nc = get<NameConstraint>(*this))
@@ -92,6 +93,10 @@ DenseHashSet<TypeId> Constraint::getMaybeMutatedFreeTypes() const
     {
         rci.traverse(taec->target);
     }
+    else if (auto fchc = get<FunctionCheckConstraint>(*this))
+    {
+        rci.traverse(fchc->argsPack);
+    }
     else if (auto ptc = get<PrimitiveTypeConstraint>(*this))
     {
         rci.traverse(ptc->freeType);
@@ -101,35 +106,27 @@ DenseHashSet<TypeId> Constraint::getMaybeMutatedFreeTypes() const
         rci.traverse(hpc->resultType);
         // `HasPropConstraints` should not mutate `subjectType`.
     }
-    else if (auto spc = get<SetPropConstraint>(*this))
-    {
-        rci.traverse(spc->resultType);
-        // `SetPropConstraints` should not mutate `subjectType` or `propType`.
-        // TODO: is this true? it "unifies" with `propType`, so maybe mutates that one too?
-    }
     else if (auto hic = get<HasIndexerConstraint>(*this))
     {
         rci.traverse(hic->resultType);
         // `HasIndexerConstraint` should not mutate `subjectType` or `indexType`.
     }
-    else if (auto sic = get<SetIndexerConstraint>(*this))
+    else if (auto apc = get<AssignPropConstraint>(*this))
     {
-        rci.traverse(sic->propType);
-        // `SetIndexerConstraints` should not mutate `subjectType` or `indexType`.
+        rci.traverse(apc->lhsType);
+        rci.traverse(apc->rhsType);
+    }
+    else if (auto aic = get<AssignIndexConstraint>(*this))
+    {
+        rci.traverse(aic->lhsType);
+        rci.traverse(aic->indexType);
+        rci.traverse(aic->rhsType);
     }
     else if (auto uc = get<UnpackConstraint>(*this))
     {
-        rci.traverse(uc->resultPack);
+        for (TypeId ty : uc->resultPack)
+            rci.traverse(ty);
         // `UnpackConstraint` should not mutate `sourcePack`.
-    }
-    else if (auto u1c = get<Unpack1Constraint>(*this))
-    {
-        rci.traverse(u1c->resultType);
-        // `Unpack1Constraint` should not mutate `sourceType`.
-    }
-    else if (auto rc = get<ReduceConstraint>(*this))
-    {
-        rci.traverse(rc->ty);
     }
     else if (auto rpc = get<ReducePackConstraint>(*this))
     {

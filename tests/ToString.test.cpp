@@ -13,6 +13,7 @@ using namespace Luau;
 LUAU_FASTFLAG(LuauRecursiveTypeParameterRestriction);
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
 LUAU_FASTFLAG(DebugLuauSharedSelf);
+LUAU_FASTFLAG(LuauAttributeSyntax);
 
 TEST_SUITE_BEGIN("ToString");
 
@@ -355,32 +356,15 @@ TEST_CASE_FIXTURE(Fixture, "quit_stringifying_type_when_length_is_exceeded")
     )");
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
-        LUAU_REQUIRE_ERROR_COUNT(3, result);
-        auto err = get<ExplicitFunctionAnnotationRecommended>(result.errors[0]);
-        LUAU_ASSERT(err);
-        CHECK("(...any) -> ()" == toString(err->recommendedReturn));
-        REQUIRE(1 == err->recommendedArgs.size());
-        CHECK("unknown" == toString(err->recommendedArgs[0].second));
-        err = get<ExplicitFunctionAnnotationRecommended>(result.errors[1]);
-        LUAU_ASSERT(err);
-        // FIXME: this recommendation could be better
-        CHECK("<a>(a) -> or<a, (...any) -> ()>" == toString(err->recommendedReturn));
-        REQUIRE(1 == err->recommendedArgs.size());
-        CHECK("unknown" == toString(err->recommendedArgs[0].second));
-        err = get<ExplicitFunctionAnnotationRecommended>(result.errors[2]);
-        LUAU_ASSERT(err);
-        // FIXME: this recommendation could be better
-        CHECK("<a>(a) -> or<a, <b>(b) -> or<b, (...any) -> ()>>" == toString(err->recommendedReturn));
-        REQUIRE(1 == err->recommendedArgs.size());
-        CHECK("unknown" == toString(err->recommendedArgs[0].second));
+        LUAU_REQUIRE_NO_ERRORS(result);
 
         ToStringOptions o;
         o.exhaustive = false;
         o.maxTypeLength = 20;
         CHECK_EQ(toString(requireType("f0"), o), "() -> ()");
-        CHECK_EQ(toString(requireType("f1"), o), "<a>(a) -> or<a, () -> ... *TRUNCATED*");
-        CHECK_EQ(toString(requireType("f2"), o), "<b>(b) -> or<b, <a>(a... *TRUNCATED*");
-        CHECK_EQ(toString(requireType("f3"), o), "<c>(c) -> or<c, <b>(b... *TRUNCATED*");
+        CHECK_EQ(toString(requireType("f1"), o), "<a>(a) -> (() -> ()) ... *TRUNCATED*");
+        CHECK_EQ(toString(requireType("f2"), o), "<b>(b) -> (<a>(a) -> (() -> ())... *TRUNCATED*");
+        CHECK_EQ(toString(requireType("f3"), o), "<c>(c) -> (<b>(b) -> (<a>(a) -> (() -> ())... *TRUNCATED*");
     }
     else
     {
@@ -407,32 +391,15 @@ TEST_CASE_FIXTURE(Fixture, "stringifying_type_is_still_capped_when_exhaustive")
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
-        LUAU_REQUIRE_ERROR_COUNT(3, result);
-        auto err = get<ExplicitFunctionAnnotationRecommended>(result.errors[0]);
-        LUAU_ASSERT(err);
-        CHECK("(...any) -> ()" == toString(err->recommendedReturn));
-        REQUIRE(1 == err->recommendedArgs.size());
-        CHECK("unknown" == toString(err->recommendedArgs[0].second));
-        err = get<ExplicitFunctionAnnotationRecommended>(result.errors[1]);
-        LUAU_ASSERT(err);
-        // FIXME: this recommendation could be better
-        CHECK("<a>(a) -> or<a, (...any) -> ()>" == toString(err->recommendedReturn));
-        REQUIRE(1 == err->recommendedArgs.size());
-        CHECK("unknown" == toString(err->recommendedArgs[0].second));
-        err = get<ExplicitFunctionAnnotationRecommended>(result.errors[2]);
-        LUAU_ASSERT(err);
-        // FIXME: this recommendation could be better
-        CHECK("<a>(a) -> or<a, <b>(b) -> or<b, (...any) -> ()>>" == toString(err->recommendedReturn));
-        REQUIRE(1 == err->recommendedArgs.size());
-        CHECK("unknown" == toString(err->recommendedArgs[0].second));
+        LUAU_REQUIRE_NO_ERRORS(result);
 
         ToStringOptions o;
         o.exhaustive = true;
         o.maxTypeLength = 20;
         CHECK_EQ(toString(requireType("f0"), o), "() -> ()");
-        CHECK_EQ(toString(requireType("f1"), o), "<a>(a) -> or<a, () -> ... *TRUNCATED*");
-        CHECK_EQ(toString(requireType("f2"), o), "<b>(b) -> or<b, <a>(a... *TRUNCATED*");
-        CHECK_EQ(toString(requireType("f3"), o), "<c>(c) -> or<c, <b>(b... *TRUNCATED*");
+        CHECK_EQ(toString(requireType("f1"), o), "<a>(a) -> (() -> ()) ... *TRUNCATED*");
+        CHECK_EQ(toString(requireType("f2"), o), "<b>(b) -> (<a>(a) -> (() -> ())... *TRUNCATED*");
+        CHECK_EQ(toString(requireType("f3"), o), "<c>(c) -> (<b>(b) -> (<a>(a) -> (() -> ())... *TRUNCATED*");
     }
     else
     {
@@ -782,7 +749,10 @@ TEST_CASE_FIXTURE(Fixture, "toStringNamedFunction_map")
     TypeId ty = requireType("map");
     const FunctionType* ftv = get<FunctionType>(follow(ty));
 
-    CHECK_EQ("map<a, b>(arr: {a}, fn: (a) -> b): {b}", toStringNamedFunction("map", *ftv));
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("map<a, b>(arr: {a}, fn: (a) -> (b, ...unknown)): {b}", toStringNamedFunction("map", *ftv));
+    else
+        CHECK_EQ("map<a, b>(arr: {a}, fn: (a) -> b): {b}", toStringNamedFunction("map", *ftv));
 }
 
 TEST_CASE_FIXTURE(Fixture, "toStringNamedFunction_generic_pack")
@@ -1007,10 +977,11 @@ TEST_CASE_FIXTURE(Fixture, "checked_fn_toString")
 {
     ScopedFastFlag flags[] = {
         {FFlag::DebugLuauDeferredConstraintResolution, true},
+        {FFlag::LuauAttributeSyntax, true},
     };
 
     auto _result = loadDefinition(R"(
-declare function @checked abs(n: number) : number
+@checked declare function abs(n: number) : number
 )");
 
     auto result = check(Mode::Nonstrict, R"(

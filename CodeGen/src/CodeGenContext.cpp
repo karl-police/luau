@@ -12,10 +12,9 @@
 
 #include "lapi.h"
 
-LUAU_FASTFLAGVARIABLE(LuauCodegenCheckNullContext, false)
-
-LUAU_FASTINT(LuauCodeGenBlockSize)
-LUAU_FASTINT(LuauCodeGenMaxTotalSize)
+LUAU_FASTINTVARIABLE(LuauCodeGenBlockSize, 4 * 1024 * 1024)
+LUAU_FASTINTVARIABLE(LuauCodeGenMaxTotalSize, 256 * 1024 * 1024)
+LUAU_FASTFLAG(LuauNativeAttribute)
 
 namespace Luau
 {
@@ -359,7 +358,7 @@ static size_t getMemorySize(lua_State* L, Proto* proto)
 
 static void initializeExecutionCallbacks(lua_State* L, BaseCodeGenContext* codeGenContext) noexcept
 {
-    CODEGEN_ASSERT(!FFlag::LuauCodegenCheckNullContext || codeGenContext != nullptr);
+    CODEGEN_ASSERT(codeGenContext != nullptr);
 
     lua_ExecutionCallbacks* ecb = &L->global->ecb;
 
@@ -455,7 +454,7 @@ template<typename AssemblyBuilder>
 
     Proto* root = clvalue(func)->l.p;
 
-    if ((options.flags & CodeGen_OnlyNativeModules) != 0 && (root->flags & LPF_NATIVE_MODULE) == 0)
+    if ((options.flags & CodeGen_OnlyNativeModules) != 0 && (root->flags & LPF_NATIVE_MODULE) == 0 && (root->flags & LPF_NATIVE_FUNCTION) == 0)
         return CompilationResult{CodeGenCompilationResult::NotNativeModule};
 
     BaseCodeGenContext* codeGenContext = getCodeGenContext(L);
@@ -463,7 +462,10 @@ template<typename AssemblyBuilder>
         return CompilationResult{CodeGenCompilationResult::CodeGenNotInitialized};
 
     std::vector<Proto*> protos;
-    gatherFunctions(protos, root, options.flags);
+    if (FFlag::LuauNativeAttribute)
+        gatherFunctions(protos, root, options.flags, root->flags & LPF_NATIVE_FUNCTION);
+    else
+        gatherFunctions_DEPRECATED(protos, root, options.flags);
 
     // Skip protos that have been compiled during previous invocations of CodeGen::compile
     protos.erase(std::remove_if(protos.begin(), protos.end(),
@@ -610,6 +612,30 @@ void setNativeExecutionEnabled(lua_State* L, bool enabled)
 {
     if (getCodeGenContext(L) != nullptr)
         L->global->ecb.enter = enabled ? onEnter : onEnterDisabled;
+}
+
+static uint8_t userdataRemapperWrap(lua_State* L, const char* str, size_t len)
+{
+    if (BaseCodeGenContext* codegenCtx = getCodeGenContext(L))
+    {
+        uint8_t index = codegenCtx->userdataRemapper(codegenCtx->userdataRemappingContext, str, len);
+
+        if (index < (LBC_TYPE_TAGGED_USERDATA_END - LBC_TYPE_TAGGED_USERDATA_BASE))
+            return LBC_TYPE_TAGGED_USERDATA_BASE + index;
+    }
+
+    return LBC_TYPE_USERDATA;
+}
+
+void setUserdataRemapper(lua_State* L, void* context, UserdataRemapperCallback cb)
+{
+    if (BaseCodeGenContext* codegenCtx = getCodeGenContext(L))
+    {
+        codegenCtx->userdataRemappingContext = context;
+        codegenCtx->userdataRemapper = cb;
+
+        L->global->ecb.gettypemapping = cb ? userdataRemapperWrap : nullptr;
+    }
 }
 
 } // namespace CodeGen

@@ -118,6 +118,8 @@ struct ConstraintGenerator
     std::function<void(const ModuleName&, const ScopePtr&)> prepareModuleScope;
     std::vector<RequireCycle> requireCycles;
 
+    DenseHashMap<TypeId, TypeIds> localTypes{nullptr};
+
     DcrLogger* logger;
 
     ConstraintGenerator(ModulePtr module, NotNull<Normalizer> normalizer, NotNull<ModuleResolver> moduleResolver, NotNull<BuiltinTypes> builtinTypes,
@@ -254,18 +256,11 @@ private:
     Inference check(const ScopePtr& scope, AstExprTable* expr, std::optional<TypeId> expectedType);
     std::tuple<TypeId, TypeId, RefinementId> checkBinary(const ScopePtr& scope, AstExprBinary* binary, std::optional<TypeId> expectedType);
 
-    struct LValueBounds
-    {
-        std::optional<TypeId> annotationTy;
-        std::optional<TypeId> assignedTy;
-    };
-
-    LValueBounds checkLValue(const ScopePtr& scope, AstExpr* expr);
-    LValueBounds checkLValue(const ScopePtr& scope, AstExprLocal* local);
-    LValueBounds checkLValue(const ScopePtr& scope, AstExprGlobal* global);
-    LValueBounds checkLValue(const ScopePtr& scope, AstExprIndexName* indexName);
-    LValueBounds checkLValue(const ScopePtr& scope, AstExprIndexExpr* indexExpr);
-    LValueBounds updateProperty(const ScopePtr& scope, AstExpr* expr);
+    void visitLValue(const ScopePtr& scope, AstExpr* expr, TypeId rhsType);
+    void visitLValue(const ScopePtr& scope, AstExprLocal* local, TypeId rhsType);
+    void visitLValue(const ScopePtr& scope, AstExprGlobal* global, TypeId rhsType);
+    void visitLValue(const ScopePtr& scope, AstExprIndexName* indexName, TypeId rhsType);
+    void visitLValue(const ScopePtr& scope, AstExprIndexExpr* indexExpr, TypeId rhsType);
 
     struct FunctionSignature
     {
@@ -360,6 +355,8 @@ private:
      * initial scan of the AST and note what globals are defined.
      */
     void prepopulateGlobalScope(const ScopePtr& globalScope, AstStatBlock* program);
+
+    bool recordPropertyAssignment(TypeId ty);
 
     // Record the fact that a particular local has a particular type in at least
     // one of its states.

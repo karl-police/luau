@@ -15,17 +15,34 @@
 
 using namespace Luau;
 
-LUAU_FASTFLAG(LuauLowerBoundsCalculation);
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
 LUAU_FASTFLAG(LuauInstantiateInSubtyping);
 LUAU_FASTFLAG(LuauAlwaysCommitInferencesOfFunctionCalls);
 LUAU_FASTFLAG(LuauFixIndexerSubtypingOrdering);
 LUAU_FASTFLAG(DebugLuauSharedSelf);
-LUAU_FASTFLAG(LuauMetatableInstantiationCloneCheck);
 
 LUAU_DYNAMIC_FASTFLAG(LuauImproveNonFunctionCallError)
 
 TEST_SUITE_BEGIN("TableTests");
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "generalization_shouldnt_seal_table_in_len_family_fn")
+{
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+    CheckResult result = check(R"(
+local t = {}
+for i = #t, 2, -1 do
+    t[i] = t[i + 1]
+end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    const TableType* tType = get<TableType>(requireType("t"));
+    REQUIRE(tType != nullptr);
+    REQUIRE(tType->indexer);
+    CHECK_EQ(tType->indexer->indexType, builtinTypes->numberType);
+    CHECK_EQ(follow(tType->indexer->indexResultType), builtinTypes->unknownType);
+}
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "LUAU_ASSERT_arg_exprs_doesnt_trigger_assert")
 {
@@ -2462,10 +2479,7 @@ local x: {number} | number | string
 local y = #x
     )");
 
-    if (FFlag::DebugLuauDeferredConstraintResolution)
-        LUAU_REQUIRE_ERROR_COUNT(2, result);
-    else
-        LUAU_REQUIRE_ERROR_COUNT(1, result);
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "dont_hang_when_trying_to_look_up_in_cyclic_metatable_index")
@@ -2973,7 +2987,7 @@ c = b
 
     const TableType* ttv = get<TableType>(*ty);
     REQUIRE(ttv);
-    CHECK(ttv->instantiatedTypeParams.empty());
+    CHECK(0 == ttv->instantiatedTypeParams.size());
 }
 
 TEST_CASE_FIXTURE(Fixture, "table_indexing_error_location")
@@ -3156,7 +3170,7 @@ TEST_CASE_FIXTURE(Fixture, "accidentally_checked_prop_in_opposite_branch")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     if (FFlag::DebugLuauDeferredConstraintResolution)
-        CHECK_EQ("Value of type '{ x: number? }?' could be nil", toString(result.errors[0]));
+        CHECK_EQ("Type 'nil' does not have key 'x'", toString(result.errors[0]));
     else
         CHECK_EQ("Value of type '{| x: number? |}?' could be nil", toString(result.errors[0]));
     CHECK_EQ("boolean", toString(requireType("u")));
@@ -3242,7 +3256,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "dont_leak_free_table_props")
 TEST_CASE_FIXTURE(Fixture, "inferred_return_type_of_free_table")
 {
     ScopedFastFlag sff[] = {
-        // {FFlag::LuauLowerBoundsCalculation, true},
         {FFlag::DebugLuauSharedSelf, true},
     };
 
@@ -4153,9 +4166,7 @@ TEST_CASE_FIXTURE(Fixture, "write_annotations_are_unsupported_even_with_the_new_
 
 TEST_CASE_FIXTURE(Fixture, "read_and_write_only_table_properties_are_unsupported")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::DebugLuauDeferredConstraintResolution, false}
-    };
+    ScopedFastFlag sff[] = {{FFlag::DebugLuauDeferredConstraintResolution, false}};
 
     CheckResult result = check(R"(
         type W = {read x: number}
@@ -4179,9 +4190,7 @@ TEST_CASE_FIXTURE(Fixture, "read_and_write_only_table_properties_are_unsupported
 
 TEST_CASE_FIXTURE(Fixture, "read_ond_write_only_indexers_are_unsupported")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::DebugLuauDeferredConstraintResolution, false}
-    };
+    ScopedFastFlag sff[] = {{FFlag::DebugLuauDeferredConstraintResolution, false}};
 
     CheckResult result = check(R"(
         type T = {read [string]: number}
@@ -4201,9 +4210,7 @@ TEST_CASE_FIXTURE(Fixture, "table_writes_introduce_write_properties")
     if (!FFlag::DebugLuauDeferredConstraintResolution)
         return;
 
-    ScopedFastFlag sff[] = {
-        {FFlag::DebugLuauDeferredConstraintResolution, true}
-    };
+    ScopedFastFlag sff[] = {{FFlag::DebugLuauDeferredConstraintResolution, true}};
 
     CheckResult result = check(R"(
         function oc(player, speaker)
@@ -4355,23 +4362,8 @@ TEST_CASE_FIXTURE(Fixture, "mymovie_read_write_tables_bug_2")
     LUAU_REQUIRE_ERRORS(result);
 }
 
-TEST_CASE_FIXTURE(Fixture, "setindexer_always_transmute")
-{
-    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
-
-    CheckResult result = check(R"(
-        function f(x)
-            (5)[5] = x
-        end
-    )");
-
-    CHECK_EQ("(*error-type*) -> ()", toString(requireType("f")));
-}
-
 TEST_CASE_FIXTURE(BuiltinsFixture, "instantiated_metatable_frozen_table_clone_mutation")
 {
-    ScopedFastFlag luauMetatableInstantiationCloneCheck{FFlag::LuauMetatableInstantiationCloneCheck, true};
-
     fileResolver.source["game/worker"] = R"(
 type WorkerImpl<T..., R...> = {
     destroy: (self: Worker<T..., R...>) -> boolean,
@@ -4412,6 +4404,21 @@ TEST_CASE_FIXTURE(Fixture, "setprop_on_a_mutating_local_in_both_loops_and_functi
     LUAU_REQUIRE_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(Fixture, "cant_index_this")
+{
+    CheckResult result = check(R"(
+        local a: number = 9
+        a[18] = "tomfoolery"
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+
+    NotATable* notATable = get<NotATable>(result.errors[0]);
+    REQUIRE(notATable);
+
+    CHECK("number" == toString(notATable->ty));
+}
+
 TEST_CASE_FIXTURE(Fixture, "setindexer_multiple_tables_intersection")
 {
     ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
@@ -4423,8 +4430,8 @@ TEST_CASE_FIXTURE(Fixture, "setindexer_multiple_tables_intersection")
         end
     )");
 
-    LUAU_REQUIRE_NO_ERRORS(result);
-    CHECK("({ [string]: number } & { [thread]: boolean }, boolean | number) -> ()" == toString(requireType("f")));
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    CHECK("({ [string]: number } & { [thread]: boolean }, never) -> ()" == toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "insert_a_and_f_of_a_into_table_res_in_a_loop")
@@ -4440,7 +4447,13 @@ TEST_CASE_FIXTURE(Fixture, "insert_a_and_f_of_a_into_table_res_in_a_loop")
         end
     )");
 
-    LUAU_REQUIRE_NO_ERRORS(result);
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+        CHECK(get<FunctionExitsWithoutReturning>(result.errors[0]));
+    }
+    else
+        LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "ipairs_adds_an_unbounded_indexer")
@@ -4504,6 +4517,48 @@ _ = nil
 end
 
 )");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "table_literal_inference_assert")
+{
+    CheckResult result = check(R"(
+        local buttons = {
+            buttons = {};
+        }
+
+        buttons.Button = {
+            call = nil;
+            lightParts = nil;
+            litPropertyOverrides = nil;
+            model = nil;
+            pivot = nil;
+            unlitPropertyOverrides = nil;
+        }
+        buttons.Button.__index = buttons.Button
+
+        local lightFuncs: { (self: types.Button, lit: boolean) -> nil } = {
+            ['\x00'] = function(self: types.Button, lit: boolean)
+        end;
+        }
+    )");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "metatable_table_assertion_crash")
+{
+    CheckResult result = check(R"(
+        local NexusInstance = {}
+        function NexusInstance:__InitMetaMethods(): ()
+            local Metatable = {}
+            local OriginalIndexTable = getmetatable(self).__index
+            setmetatable(self, Metatable)
+
+            Metatable.__newindex = function(_, Index: string, Value: any): ()
+                --Return if the new and old values are the same.
+                if self[Index] == Value then
+                end
+            end
+        end
+    )");
 }
 
 TEST_SUITE_END();
