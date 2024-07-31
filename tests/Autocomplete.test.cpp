@@ -224,6 +224,7 @@ test.idk = "hi"
 
 local e = abc(test)
 print(e.no)
+e.isNil = nil
 e.TheIs_doesntActual_Properlty="e"
 e.this_doesnt_act_properly@1
 )");
