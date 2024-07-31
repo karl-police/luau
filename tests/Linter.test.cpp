@@ -8,7 +8,6 @@
 #include "doctest.h"
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
-LUAU_FASTFLAG(LuauAttributeSyntax);
 LUAU_FASTFLAG(LuauNativeAttribute);
 LUAU_FASTFLAG(LintRedundantNativeAttribute);
 
@@ -28,7 +27,7 @@ end
     REQUIRE(0 == result.warnings.size());
 }
 
-TEST_CASE_FIXTURE(Fixture, "type_family_fully_reduces")
+TEST_CASE_FIXTURE(Fixture, "type_function_fully_reduces")
 {
     LintResult result = lint(R"(
 function fib(n)
@@ -1485,7 +1484,7 @@ TEST_CASE_FIXTURE(Fixture, "LintHygieneUAF")
 TEST_CASE_FIXTURE(BuiltinsFixture, "DeprecatedApiTyped")
 {
     unfreeze(frontend.globals.globalTypes);
-    TypeId instanceType = frontend.globals.globalTypes.addType(ClassType{"Instance", {}, std::nullopt, std::nullopt, {}, {}, "Test"});
+    TypeId instanceType = frontend.globals.globalTypes.addType(ClassType{"Instance", {}, std::nullopt, std::nullopt, {}, {}, "Test", {}});
     persist(instanceType);
     frontend.globals.globalScope->exportedTypeBindings["Instance"] = TypeFun{{}, instanceType};
 
@@ -1960,7 +1959,7 @@ local _ = a <= (b == 0)
 
 TEST_CASE_FIXTURE(Fixture, "RedundantNativeAttribute")
 {
-    ScopedFastFlag sff[] = {{FFlag::LuauAttributeSyntax, true}, {FFlag::LuauNativeAttribute, true}, {FFlag::LintRedundantNativeAttribute, true}};
+    ScopedFastFlag sff[] = {{FFlag::LuauNativeAttribute, true}, {FFlag::LintRedundantNativeAttribute, true}};
 
     LintResult result = lint(R"(
 --!native

@@ -9,7 +9,7 @@
 #include "Luau/RecursionCounter.h"
 #include "Luau/StringUtils.h"
 #include "Luau/ToString.h"
-#include "Luau/TypeFamily.h"
+#include "Luau/TypeFunction.h"
 #include "Luau/TypeInfer.h"
 #include "Luau/TypePack.h"
 #include "Luau/VecDeque.h"
@@ -423,8 +423,8 @@ bool maybeSingleton(TypeId ty)
         for (TypeId part : itv)
             if (maybeSingleton(part)) // will i regret this?
                 return true;
-    if (const TypeFamilyInstanceType* tfit = get<TypeFamilyInstanceType>(ty))
-        if (tfit->family->name == "keyof" || tfit->family->name == "rawkeyof")
+    if (const TypeFunctionInstanceType* tfit = get<TypeFunctionInstanceType>(ty))
+        if (tfit->function->name == "keyof" || tfit->function->name == "rawkeyof")
             return true;
     return false;
 }
@@ -969,7 +969,7 @@ BuiltinTypes::BuiltinTypes()
     , threadType(arena->addType(Type{PrimitiveType{PrimitiveType::Thread}, /*persistent*/ true}))
     , bufferType(arena->addType(Type{PrimitiveType{PrimitiveType::Buffer}, /*persistent*/ true}))
     , functionType(arena->addType(Type{PrimitiveType{PrimitiveType::Function}, /*persistent*/ true}))
-    , classType(arena->addType(Type{ClassType{"class", {}, std::nullopt, std::nullopt, {}, {}, {}}, /*persistent*/ true}))
+    , classType(arena->addType(Type{ClassType{"class", {}, std::nullopt, std::nullopt, {}, {}, {}, {}}, /*persistent*/ true}))
     , tableType(arena->addType(Type{PrimitiveType{PrimitiveType::Table}, /*persistent*/ true}))
     , emptyTableType(arena->addType(Type{TableType{TableState::Sealed, TypeLevel{}, nullptr}, /*persistent*/ true}))
     , trueType(arena->addType(Type{SingletonType{BooleanSingleton{true}}, /*persistent*/ true}))
@@ -1081,7 +1081,7 @@ void persist(TypeId ty)
         else if (get<GenericType>(t) || get<AnyType>(t) || get<FreeType>(t) || get<SingletonType>(t) || get<PrimitiveType>(t) || get<NegationType>(t))
         {
         }
-        else if (auto tfit = get<TypeFamilyInstanceType>(t))
+        else if (auto tfit = get<TypeFunctionInstanceType>(t))
         {
             for (auto ty : tfit->typeArguments)
                 queue.push_back(ty);
@@ -1117,7 +1117,7 @@ void persist(TypePackId tp)
     else if (get<GenericTypePack>(tp))
     {
     }
-    else if (auto tfitp = get<TypeFamilyInstanceTypePack>(tp))
+    else if (auto tfitp = get<TypeFunctionInstanceTypePack>(tp))
     {
         for (auto ty : tfitp->typeArguments)
             persist(ty);

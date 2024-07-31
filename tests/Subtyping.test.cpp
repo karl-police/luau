@@ -7,7 +7,7 @@
 #include "Luau/Subtyping.h"
 #include "Luau/Type.h"
 #include "Luau/TypePack.h"
-#include "Luau/TypeFamily.h"
+#include "Luau/TypeFunction.h"
 
 #include "doctest.h"
 #include "Fixture.h"
@@ -73,7 +73,7 @@ struct SubtypeFixture : Fixture
     ScopePtr moduleScope{new Scope(rootScope)};
 
     Subtyping subtyping = mkSubtyping(rootScope);
-    BuiltinTypeFamilies builtinTypeFamilies{};
+    BuiltinTypeFunctions builtinTypeFunctions{};
 
     Subtyping mkSubtyping(const ScopePtr& scope)
     {
@@ -146,7 +146,7 @@ struct SubtypeFixture : Fixture
 
     TypeId cls(const std::string& name, std::optional<TypeId> parent = std::nullopt)
     {
-        return arena.addType(ClassType{name, {}, parent.value_or(builtinTypes->classType), {}, {}, nullptr, ""});
+        return arena.addType(ClassType{name, {}, parent.value_or(builtinTypes->classType), {}, {}, nullptr, "", {}});
     }
 
     TypeId cls(const std::string& name, ClassType::Props&& props)
@@ -398,51 +398,51 @@ TEST_SUITE_BEGIN("Subtyping");
 TEST_IS_SUBTYPE(builtinTypes->numberType, builtinTypes->anyType);
 TEST_IS_NOT_SUBTYPE(builtinTypes->numberType, builtinTypes->stringType);
 
-TEST_CASE_FIXTURE(SubtypeFixture, "basic_reducible_sub_typefamily")
+TEST_CASE_FIXTURE(SubtypeFixture, "basic_reducible_sub_type_function")
 {
     // add<number, number> <: number
-    TypeId typeFamilyNum =
-        arena.addType(TypeFamilyInstanceType{NotNull{&builtinTypeFamilies.addFamily}, {builtinTypes->numberType, builtinTypes->numberType}, {}});
+    TypeId typeFunctionNum =
+        arena.addType(TypeFunctionInstanceType{NotNull{&builtinTypeFunctions.addFunc}, {builtinTypes->numberType, builtinTypes->numberType}, {}});
     TypeId superTy = builtinTypes->numberType;
-    SubtypingResult result = isSubtype(typeFamilyNum, superTy);
+    SubtypingResult result = isSubtype(typeFunctionNum, superTy);
     CHECK(result.isSubtype);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "basic_reducible_super_typefamily")
+TEST_CASE_FIXTURE(SubtypeFixture, "basic_reducible_super_type_function")
 {
     // number <: add<number, number> ~ number
-    TypeId typeFamilyNum =
-        arena.addType(TypeFamilyInstanceType{NotNull{&builtinTypeFamilies.addFamily}, {builtinTypes->numberType, builtinTypes->numberType}, {}});
+    TypeId typeFunctionNum =
+        arena.addType(TypeFunctionInstanceType{NotNull{&builtinTypeFunctions.addFunc}, {builtinTypes->numberType, builtinTypes->numberType}, {}});
     TypeId subTy = builtinTypes->numberType;
-    SubtypingResult result = isSubtype(subTy, typeFamilyNum);
+    SubtypingResult result = isSubtype(subTy, typeFunctionNum);
     CHECK(result.isSubtype);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "basic_irreducible_sub_typefamily")
+TEST_CASE_FIXTURE(SubtypeFixture, "basic_irreducible_sub_type_function")
 {
     // add<string, boolean> ~ never <: number
-    TypeId typeFamilyNum =
-        arena.addType(TypeFamilyInstanceType{NotNull{&builtinTypeFamilies.addFamily}, {builtinTypes->stringType, builtinTypes->booleanType}, {}});
+    TypeId typeFunctionNum =
+        arena.addType(TypeFunctionInstanceType{NotNull{&builtinTypeFunctions.addFunc}, {builtinTypes->stringType, builtinTypes->booleanType}, {}});
     TypeId superTy = builtinTypes->numberType;
-    SubtypingResult result = isSubtype(typeFamilyNum, superTy);
+    SubtypingResult result = isSubtype(typeFunctionNum, superTy);
     CHECK(result.isSubtype);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "basic_irreducible_super_typefamily")
+TEST_CASE_FIXTURE(SubtypeFixture, "basic_irreducible_super_type_function")
 {
     // number <\: add<string, boolean> ~ irreducible/never
-    TypeId typeFamilyNum =
-        arena.addType(TypeFamilyInstanceType{NotNull{&builtinTypeFamilies.addFamily}, {builtinTypes->stringType, builtinTypes->booleanType}, {}});
+    TypeId typeFunctionNum =
+        arena.addType(TypeFunctionInstanceType{NotNull{&builtinTypeFunctions.addFunc}, {builtinTypes->stringType, builtinTypes->booleanType}, {}});
     TypeId subTy = builtinTypes->numberType;
-    SubtypingResult result = isSubtype(subTy, typeFamilyNum);
+    SubtypingResult result = isSubtype(subTy, typeFunctionNum);
     CHECK(!result.isSubtype);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "basic_typefamily_with_generics")
+TEST_CASE_FIXTURE(SubtypeFixture, "basic_type_function_with_generics")
 {
     // <T,U>(x: T, x: U) -> add<T,U> <: (number, number) -> number
-    TypeId addFamily = arena.addType(TypeFamilyInstanceType{NotNull{&builtinTypeFamilies.addFamily}, {genericT, genericU}, {}});
-    FunctionType ft{{genericT, genericU}, {}, arena.addTypePack({genericT, genericU}), arena.addTypePack({addFamily})};
+    TypeId addTypeFunction = arena.addType(TypeFunctionInstanceType{NotNull{&builtinTypeFunctions.addFunc}, {genericT, genericU}, {}});
+    FunctionType ft{{genericT, genericU}, {}, arena.addTypePack({genericT, genericU}), arena.addTypePack({addTypeFunction})};
     TypeId functionType = arena.addType(std::move(ft));
     FunctionType superFt{arena.addTypePack({builtinTypes->numberType, builtinTypes->numberType}), arena.addTypePack({builtinTypes->numberType})};
     TypeId superFunction = arena.addType(std::move(superFt));
@@ -470,9 +470,11 @@ TEST_CASE_FIXTURE(SubtypeFixture, "variadic_subpath_in_pack")
     CHECK(!result.isSubtype);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "any <!: unknown")
+TEST_CASE_FIXTURE(SubtypeFixture, "any <: unknown")
 {
-    CHECK_IS_NOT_SUBTYPE(builtinTypes->anyType, builtinTypes->unknownType);
+    // We have added this as an exception - the set of inhabitants of any is exactly the set of inhabitants of unknown (since error has no
+    // inhabitants). any = err | unknown, so under semantic subtyping, {} U unknown = unknown
+    CHECK_IS_SUBTYPE(builtinTypes->anyType, builtinTypes->unknownType);
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "number? <: unknown")
@@ -990,39 +992,51 @@ TEST_CASE_FIXTURE(SubtypeFixture, "semantic_subtyping_disj")
 
 TEST_CASE_FIXTURE(SubtypeFixture, "t1 where t1 = {trim: (t1) -> string} <: t2 where t2 = {trim: (t2) -> string}")
 {
-    TypeId t1 = cyclicTable([&](TypeId ty, TableType* tt) {
-        tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
-    });
+    TypeId t1 = cyclicTable(
+        [&](TypeId ty, TableType* tt)
+        {
+            tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
+        });
 
-    TypeId t2 = cyclicTable([&](TypeId ty, TableType* tt) {
-        tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
-    });
+    TypeId t2 = cyclicTable(
+        [&](TypeId ty, TableType* tt)
+        {
+            tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
+        });
 
     CHECK_IS_SUBTYPE(t1, t2);
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "t1 where t1 = {trim: (t1) -> string} <!: t2 where t2 = {trim: (t2) -> t2}")
 {
-    TypeId t1 = cyclicTable([&](TypeId ty, TableType* tt) {
-        tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
-    });
+    TypeId t1 = cyclicTable(
+        [&](TypeId ty, TableType* tt)
+        {
+            tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
+        });
 
-    TypeId t2 = cyclicTable([&](TypeId ty, TableType* tt) {
-        tt->props["trim"] = fn({ty}, {ty});
-    });
+    TypeId t2 = cyclicTable(
+        [&](TypeId ty, TableType* tt)
+        {
+            tt->props["trim"] = fn({ty}, {ty});
+        });
 
     CHECK_IS_NOT_SUBTYPE(t1, t2);
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "t1 where t1 = {trim: (t1) -> t1} <!: t2 where t2 = {trim: (t2) -> string}")
 {
-    TypeId t1 = cyclicTable([&](TypeId ty, TableType* tt) {
-        tt->props["trim"] = fn({ty}, {ty});
-    });
+    TypeId t1 = cyclicTable(
+        [&](TypeId ty, TableType* tt)
+        {
+            tt->props["trim"] = fn({ty}, {ty});
+        });
 
-    TypeId t2 = cyclicTable([&](TypeId ty, TableType* tt) {
-        tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
-    });
+    TypeId t2 = cyclicTable(
+        [&](TypeId ty, TableType* tt)
+        {
+            tt->props["trim"] = fn({ty}, {builtinTypes->stringType});
+        });
 
     CHECK_IS_NOT_SUBTYPE(t1, t2);
 }
@@ -1286,13 +1300,13 @@ TEST_CASE_FIXTURE(SubtypeFixture, "<T>({ x: T }) -> T <: ({ method: <T>({ x: T }
     CHECK_IS_SUBTYPE(tableToPropType, otherType);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "subtyping_reasonings_to_follow_a_reduced_type_family_instance")
+TEST_CASE_FIXTURE(SubtypeFixture, "subtyping_reasonings_to_follow_a_reduced_type_function_instance")
 {
     TypeId longTy = arena.addType(UnionType{{builtinTypes->booleanType, builtinTypes->bufferType, builtinTypes->classType, builtinTypes->functionType,
         builtinTypes->numberType, builtinTypes->stringType, builtinTypes->tableType, builtinTypes->threadType}});
     TypeId tblTy = tbl({{"depth", builtinTypes->unknownType}});
     TypeId combined = meet(longTy, tblTy);
-    TypeId subTy = arena.addType(TypeFamilyInstanceType{NotNull{&builtinTypeFamilies.unionFamily}, {combined, builtinTypes->neverType}, {}});
+    TypeId subTy = arena.addType(TypeFunctionInstanceType{NotNull{&builtinTypeFunctions.unionFunc}, {combined, builtinTypes->neverType}, {}});
     TypeId superTy = builtinTypes->neverType;
     SubtypingResult result = isSubtype(subTy, superTy);
     CHECK(!result.isSubtype);
@@ -1321,9 +1335,10 @@ TEST_CASE_FIXTURE(SubtypeFixture, "table_property")
 
     SubtypingResult result = isSubtype(subTy, superTy);
     CHECK(!result.isSubtype);
-    CHECK(result.reasoning == std::vector{SubtypingReasoning{/* subPath */ Path(TypePath::Property::read("X")),
-                                  /* superPath */ Path(TypePath::Property::read("X")),
-                                  /* variance */ SubtypingVariance::Invariant}});
+    REQUIRE(result.reasoning.size() == 1);
+    CHECK(*result.reasoning.begin() == SubtypingReasoning{/* subPath */ Path(TypePath::Property::read("X")),
+                                           /* superPath */ Path(TypePath::Property::read("X")),
+                                           /* variance */ SubtypingVariance::Invariant});
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "table_indexers")
@@ -1394,10 +1409,11 @@ TEST_CASE_FIXTURE(SubtypeFixture, "fn_rets")
 
     SubtypingResult result = isSubtype(subTy, superTy);
     CHECK(!result.isSubtype);
-    CHECK(result.reasoning == std::vector{SubtypingReasoning{
-                                  /* subPath */ TypePath::PathBuilder().rets().index(0).build(),
-                                  /* superPath */ TypePath::PathBuilder().rets().index(0).build(),
-                              }});
+    REQUIRE(result.reasoning.size() == 1);
+    CHECK(*result.reasoning.begin() == SubtypingReasoning{
+                                           /* subPath */ TypePath::PathBuilder().rets().index(0).build(),
+                                           /* superPath */ TypePath::PathBuilder().rets().index(0).build(),
+                                       });
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "fn_rets_tail")
@@ -1407,10 +1423,11 @@ TEST_CASE_FIXTURE(SubtypeFixture, "fn_rets_tail")
 
     SubtypingResult result = isSubtype(subTy, superTy);
     CHECK(!result.isSubtype);
-    CHECK(result.reasoning == std::vector{SubtypingReasoning{
-                                  /* subPath */ TypePath::PathBuilder().rets().tail().variadic().build(),
-                                  /* superPath */ TypePath::PathBuilder().rets().tail().variadic().build(),
-                              }});
+    REQUIRE(result.reasoning.size() == 1);
+    CHECK(*result.reasoning.begin() == SubtypingReasoning{
+                                           /* subPath */ TypePath::PathBuilder().rets().tail().variadic().build(),
+                                           /* superPath */ TypePath::PathBuilder().rets().tail().variadic().build(),
+                                       });
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "nested_table_properties")
@@ -1420,11 +1437,12 @@ TEST_CASE_FIXTURE(SubtypeFixture, "nested_table_properties")
 
     SubtypingResult result = isSubtype(subTy, superTy);
     CHECK(!result.isSubtype);
-    CHECK(result.reasoning == std::vector{SubtypingReasoning{
-                                  /* subPath */ TypePath::PathBuilder().readProp("X").readProp("Y").readProp("Z").build(),
-                                  /* superPath */ TypePath::PathBuilder().readProp("X").readProp("Y").readProp("Z").build(),
-                                  /* variance */ SubtypingVariance::Invariant,
-                              }});
+    REQUIRE(result.reasoning.size() == 1);
+    CHECK(*result.reasoning.begin() == SubtypingReasoning{
+                                           /* subPath */ TypePath::PathBuilder().readProp("X").readProp("Y").readProp("Z").build(),
+                                           /* superPath */ TypePath::PathBuilder().readProp("X").readProp("Y").readProp("Z").build(),
+                                           /* variance */ SubtypingVariance::Invariant,
+                                       });
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "string_table_mt")

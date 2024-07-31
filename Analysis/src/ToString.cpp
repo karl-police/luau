@@ -11,7 +11,7 @@
 #include "Luau/TypeInfer.h"
 #include "Luau/TypePack.h"
 #include "Luau/Type.h"
-#include "Luau/TypeFamily.h"
+#include "Luau/TypeFunction.h"
 #include "Luau/VisitType.h"
 #include "Luau/TypeOrPack.h"
 
@@ -1031,9 +1031,9 @@ struct TypeStringifier
             state.emit(")");
     }
 
-    void operator()(TypeId, const TypeFamilyInstanceType& tfitv)
+    void operator()(TypeId, const TypeFunctionInstanceType& tfitv)
     {
-        state.emit(tfitv.family->name);
+        state.emit(tfitv.function->name);
         state.emit("<");
 
         bool comma = false;
@@ -1232,9 +1232,9 @@ struct TypePackStringifier
         state.emit("*");
     }
 
-    void operator()(TypePackId, const TypeFamilyInstanceTypePack& tfitp)
+    void operator()(TypePackId, const TypeFunctionInstanceTypePack& tfitp)
     {
-        state.emit(tfitp.family->name);
+        state.emit(tfitp.function->name);
         state.emit("<");
 
         bool comma = false;

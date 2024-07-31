@@ -15,3 +15,5 @@
 /luau-analyze
 /luau-compile
 __pycache__
+.cache
+.clangd

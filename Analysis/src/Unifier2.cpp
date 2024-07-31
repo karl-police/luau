@@ -8,7 +8,7 @@
 #include "Luau/Type.h"
 #include "Luau/TypeArena.h"
 #include "Luau/TypeCheckLimits.h"
-#include "Luau/TypeFamily.h"
+#include "Luau/TypeFunction.h"
 #include "Luau/TypeFwd.h"
 #include "Luau/TypePack.h"
 #include "Luau/TypeUtils.h"
@@ -76,13 +76,13 @@ static bool areCompatible(TypeId left, TypeId right)
 // returns `true` if `ty` is irressolvable and should be added to `incompleteSubtypes`.
 static bool isIrresolvable(TypeId ty)
 {
-    return get<BlockedType>(ty) || get<TypeFamilyInstanceType>(ty);
+    return get<BlockedType>(ty) || get<TypeFunctionInstanceType>(ty);
 }
 
 // returns `true` if `tp` is irressolvable and should be added to `incompleteSubtypes`.
 static bool isIrresolvable(TypePackId tp)
 {
-    return get<BlockedTypePack>(tp) || get<TypeFamilyInstanceTypePack>(tp);
+    return get<BlockedTypePack>(tp) || get<TypeFunctionInstanceTypePack>(tp);
 }
 
 Unifier2::Unifier2(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtinTypes, NotNull<Scope> scope, NotNull<InternalErrorReporter> ice)
@@ -92,19 +92,19 @@ Unifier2::Unifier2(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtinTypes,
     , ice(ice)
     , limits(TypeCheckLimits{}) // TODO: typecheck limits in unifier2
     , recursionLimit(FInt::LuauTypeInferRecursionLimit)
-    , uninhabitedTypeFamilies(nullptr)
+    , uninhabitedTypeFunctions(nullptr)
 {
 }
 
 Unifier2::Unifier2(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtinTypes, NotNull<Scope> scope, NotNull<InternalErrorReporter> ice,
-    DenseHashSet<const void*>* uninhabitedTypeFamilies)
+    DenseHashSet<const void*>* uninhabitedTypeFunctions)
     : arena(arena)
     , builtinTypes(builtinTypes)
     , scope(scope)
     , ice(ice)
     , limits(TypeCheckLimits{}) // TODO: typecheck limits in unifier2
     , recursionLimit(FInt::LuauTypeInferRecursionLimit)
-    , uninhabitedTypeFamilies(uninhabitedTypeFamilies)
+    , uninhabitedTypeFunctions(uninhabitedTypeFunctions)
 {
 }
 
@@ -135,7 +135,7 @@ bool Unifier2::unify(TypeId subTy, TypeId superTy)
     //   - *blocked* <: unknown
     if ((isIrresolvable(subTy) || isIrresolvable(superTy)) && !get<NeverType>(subTy) && !get<UnknownType>(superTy))
     {
-        if (uninhabitedTypeFamilies && (uninhabitedTypeFamilies->contains(subTy) || uninhabitedTypeFamilies->contains(superTy)))
+        if (uninhabitedTypeFunctions && (uninhabitedTypeFunctions->contains(subTy) || uninhabitedTypeFunctions->contains(superTy)))
             return true;
 
         incompleteSubtypes.push_back(SubtypeConstraint{subTy, superTy});
@@ -539,7 +539,7 @@ bool Unifier2::unify(TypePackId subTp, TypePackId superTp)
 
     if (isIrresolvable(subTp) || isIrresolvable(superTp))
     {
-        if (uninhabitedTypeFamilies && (uninhabitedTypeFamilies->contains(subTp) || uninhabitedTypeFamilies->contains(superTp)))
+        if (uninhabitedTypeFunctions && (uninhabitedTypeFunctions->contains(subTp) || uninhabitedTypeFunctions->contains(superTp)))
             return true;
 
         incompleteSubtypes.push_back(PackSubtypeConstraint{subTp, superTp});

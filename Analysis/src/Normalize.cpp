@@ -115,6 +115,15 @@ TypeIds::iterator TypeIds::erase(TypeIds::const_iterator it)
     return order.erase(it);
 }
 
+void TypeIds::erase(TypeId ty)
+{
+    const_iterator it = std::find(order.begin(), order.end(), ty);
+    if (it == order.end())
+        return;
+
+    erase(it);
+}
+
 size_t TypeIds::size() const
 {
     return order.size();
@@ -255,8 +264,10 @@ bool isSubtype(const NormalizedStringType& subStr, const NormalizedStringType& s
 
 void NormalizedClassType::pushPair(TypeId ty, TypeIds negations)
 {
-    ordering.push_back(ty);
-    classes.insert(std::make_pair(ty, std::move(negations)));
+    auto result = classes.insert(std::make_pair(ty, std::move(negations)));
+    if (result.second)
+        ordering.push_back(ty);
+    LUAU_ASSERT(ordering.size() == classes.size());
 }
 
 void NormalizedClassType::resetToNever()
@@ -814,7 +825,7 @@ static bool areNormalizedClasses(const NormalizedClassType& tys)
 
 static bool isPlainTyvar(TypeId ty)
 {
-    return (get<FreeType>(ty) || get<GenericType>(ty) || get<BlockedType>(ty) || get<PendingExpansionType>(ty) || get<TypeFamilyInstanceType>(ty));
+    return (get<FreeType>(ty) || get<GenericType>(ty) || get<BlockedType>(ty) || get<PendingExpansionType>(ty) || get<TypeFunctionInstanceType>(ty));
 }
 
 static bool isNormalizedTyvar(const NormalizedTyvars& tyvars)
@@ -881,7 +892,7 @@ static bool isCacheable(TypePackId tp, Set<TypeId>& seen)
 
     if (auto tail = it.tail())
     {
-        if (get<FreeTypePack>(*tail) || get<BlockedTypePack>(*tail) || get<TypeFamilyInstanceTypePack>(*tail))
+        if (get<FreeTypePack>(*tail) || get<BlockedTypePack>(*tail) || get<TypeFunctionInstanceTypePack>(*tail))
             return false;
     }
 
@@ -899,7 +910,7 @@ static bool isCacheable(TypeId ty, Set<TypeId>& seen)
     if (get<FreeType>(ty) || get<BlockedType>(ty) || get<PendingExpansionType>(ty))
         return false;
 
-    if (auto tfi = get<TypeFamilyInstanceType>(ty))
+    if (auto tfi = get<TypeFunctionInstanceType>(ty))
     {
         for (TypeId t : tfi->typeArguments)
         {
@@ -1793,7 +1804,7 @@ NormalizationResult Normalizer::unionNormalWithTy(NormalizedType& here, TypeId t
     else if (get<UnknownType>(here.tops))
         return NormalizationResult::True;
     else if (get<GenericType>(there) || get<FreeType>(there) || get<BlockedType>(there) || get<PendingExpansionType>(there) ||
-             get<TypeFamilyInstanceType>(there))
+             get<TypeFunctionInstanceType>(there))
     {
         if (tyvarIndex(there) <= ignoreSmallerTyvars)
             return NormalizationResult::True;
@@ -1870,7 +1881,7 @@ NormalizationResult Normalizer::unionNormalWithTy(NormalizedType& here, TypeId t
         if (res != NormalizationResult::True)
             return res;
     }
-    else if (get<PendingExpansionType>(there) || get<TypeFamilyInstanceType>(there))
+    else if (get<PendingExpansionType>(there) || get<TypeFunctionInstanceType>(there))
     {
         // nothing
     }
@@ -3078,7 +3089,7 @@ NormalizationResult Normalizer::intersectNormalWithTy(NormalizedType& here, Type
         return NormalizationResult::True;
     }
     else if (get<GenericType>(there) || get<FreeType>(there) || get<BlockedType>(there) || get<PendingExpansionType>(there) ||
-             get<TypeFamilyInstanceType>(there))
+             get<TypeFunctionInstanceType>(there))
     {
         NormalizedType thereNorm{builtinTypes};
         NormalizedType topNorm{builtinTypes};

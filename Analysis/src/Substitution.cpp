@@ -117,7 +117,7 @@ static TypeId shallowClone(TypeId ty, TypeArena& dest, const TxnLog* log, bool a
         {
             if (alwaysClone)
             {
-                ClassType clone{a.name, a.props, a.parent, a.metatable, a.tags, a.userData, a.definitionModuleName, a.indexer};
+                ClassType clone{a.name, a.props, a.parent, a.metatable, a.tags, a.userData, a.definitionModuleName, a.definitionLocation, a.indexer};
                 return dest.addType(std::move(clone));
             }
             else
@@ -125,9 +125,9 @@ static TypeId shallowClone(TypeId ty, TypeArena& dest, const TxnLog* log, bool a
         }
         else if constexpr (std::is_same_v<T, NegationType>)
             return dest.addType(NegationType{a.ty});
-        else if constexpr (std::is_same_v<T, TypeFamilyInstanceType>)
+        else if constexpr (std::is_same_v<T, TypeFunctionInstanceType>)
         {
-            TypeFamilyInstanceType clone{a.family, a.typeArguments, a.packArguments};
+            TypeFunctionInstanceType clone{a.function, a.typeArguments, a.packArguments};
             return dest.addType(std::move(clone));
         }
         else
@@ -226,7 +226,7 @@ void Tarjan::visitChildren(TypeId ty, int index)
         for (TypePackId a : petv->packArguments)
             visitChild(a);
     }
-    else if (const TypeFamilyInstanceType* tfit = get<TypeFamilyInstanceType>(ty))
+    else if (const TypeFunctionInstanceType* tfit = get<TypeFunctionInstanceType>(ty))
     {
         for (TypeId a : tfit->typeArguments)
             visitChild(a);
@@ -669,10 +669,10 @@ TypePackId Substitution::clone(TypePackId tp)
         clone.hidden = vtp->hidden;
         return addTypePack(std::move(clone));
     }
-    else if (const TypeFamilyInstanceTypePack* tfitp = get<TypeFamilyInstanceTypePack>(tp))
+    else if (const TypeFunctionInstanceTypePack* tfitp = get<TypeFunctionInstanceTypePack>(tp))
     {
-        TypeFamilyInstanceTypePack clone{
-            tfitp->family, std::vector<TypeId>(tfitp->typeArguments.size()), std::vector<TypePackId>(tfitp->packArguments.size())};
+        TypeFunctionInstanceTypePack clone{
+            tfitp->function, std::vector<TypeId>(tfitp->typeArguments.size()), std::vector<TypePackId>(tfitp->packArguments.size())};
         clone.typeArguments.assign(tfitp->typeArguments.begin(), tfitp->typeArguments.end());
         clone.packArguments.assign(tfitp->packArguments.begin(), tfitp->packArguments.end());
         return addTypePack(std::move(clone));
@@ -753,7 +753,12 @@ void Substitution::replaceChildren(TypeId ty)
         for (auto& [name, prop] : ttv->props)
         {
             if (FFlag::DebugLuauDeferredConstraintResolution)
-                prop = Property::create(replace(prop.readTy), replace(prop.writeTy));
+            {
+                if (prop.readTy)
+                    prop.readTy = replace(prop.readTy);
+                if (prop.writeTy)
+                    prop.writeTy = replace(prop.writeTy);
+            }
             else
                 prop.setType(replace(prop.type()));
         }
@@ -793,7 +798,7 @@ void Substitution::replaceChildren(TypeId ty)
         for (TypePackId& a : petv->packArguments)
             a = replace(a);
     }
-    else if (TypeFamilyInstanceType* tfit = getMutable<TypeFamilyInstanceType>(ty))
+    else if (TypeFunctionInstanceType* tfit = getMutable<TypeFunctionInstanceType>(ty))
     {
         for (TypeId& a : tfit->typeArguments)
             a = replace(a);
@@ -845,7 +850,7 @@ void Substitution::replaceChildren(TypePackId tp)
     {
         vtp->ty = replace(vtp->ty);
     }
-    else if (TypeFamilyInstanceTypePack* tfitp = getMutable<TypeFamilyInstanceTypePack>(tp))
+    else if (TypeFunctionInstanceTypePack* tfitp = getMutable<TypeFunctionInstanceTypePack>(tp))
     {
         for (TypeId& t : tfitp->typeArguments)
             t = replace(t);

@@ -1,6 +1,7 @@
 // This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 #include "Luau/Frontend.h"
 
+#include "Luau/AnyTypeSummary.h"
 #include "Luau/BuiltinDefinitions.h"
 #include "Luau/Clone.h"
 #include "Luau/Common.h"
@@ -10,13 +11,15 @@
 #include "Luau/DataFlowGraph.h"
 #include "Luau/DcrLogger.h"
 #include "Luau/FileResolver.h"
+#include "Luau/NonStrictTypeChecker.h"
 #include "Luau/Parser.h"
 #include "Luau/Scope.h"
 #include "Luau/StringUtils.h"
 #include "Luau/TimeTrace.h"
+#include "Luau/ToString.h"
+#include "Luau/Transpiler.h"
 #include "Luau/TypeArena.h"
 #include "Luau/TypeChecker2.h"
-#include "Luau/NonStrictTypeChecker.h"
 #include "Luau/TypeInfer.h"
 #include "Luau/Variant.h"
 #include "Luau/VisitType.h"
@@ -35,12 +38,16 @@ LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTFLAG(LuauInferInNoCheckMode)
 LUAU_FASTFLAGVARIABLE(LuauKnowsTheDataModel3, false)
 LUAU_FASTFLAGVARIABLE(LuauCancelFromProgress, false)
+LUAU_FASTFLAGVARIABLE(LuauStoreCommentsForDefinitionFiles, false)
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJson, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode, false)
+LUAU_FASTFLAGVARIABLE(LuauSourceModuleUpdatedWithSelectedMode, false)
+
+LUAU_FASTFLAG(StudioReportLuauAny)
 
 namespace Luau
 {
@@ -126,6 +133,13 @@ static ParseResult parseSourceForModule(std::string_view source, Luau::SourceMod
     Luau::ParseResult parseResult = Luau::Parser::parse(source.data(), source.size(), *sourceModule.names, *sourceModule.allocator, options);
     sourceModule.root = parseResult.root;
     sourceModule.mode = Mode::Definition;
+
+    if (FFlag::LuauStoreCommentsForDefinitionFiles && options.captureComments)
+    {
+        sourceModule.hotcomments = parseResult.hotcomments;
+        sourceModule.commentLocations = parseResult.commentLocations;
+    }
+
     return parseResult;
 }
 
@@ -479,6 +493,20 @@ CheckResult Frontend::check(const ModuleName& name, std::optional<FrontendOption
 
         if (item.name == name)
             checkResult.lintResult = item.module->lintResult;
+
+        if (FFlag::StudioReportLuauAny && item.options.retainFullTypeGraphs)
+        {
+            if (item.module)
+            {
+                const SourceModule& sourceModule = *item.sourceModule;
+                if (sourceModule.mode == Luau::Mode::Strict)
+                {
+                    item.module->ats.root = toString(sourceModule.root);
+                }
+
+                item.module->ats.traverse(item.module.get(), sourceModule.root, NotNull{&builtinTypes_});
+            }
+        }
     }
 
     return checkResult;
@@ -918,6 +946,9 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
         mode = Mode::Nonstrict;
     else
         mode = sourceModule.mode.value_or(config.mode);
+
+    if (FFlag::LuauSourceModuleUpdatedWithSelectedMode)
+        item.sourceModule->mode = {mode};
     ScopePtr environmentScope = item.environmentScope;
     double timestamp = getTimestamp();
     const std::vector<RequireCycle>& requireCycles = item.requireCycles;
@@ -1225,7 +1256,7 @@ struct InternalTypeFinder : TypeOnceVisitor
         return false;
     }
 
-    bool visit(TypePackId, const TypeFamilyInstanceTypePack&) override
+    bool visit(TypePackId, const TypeFunctionInstanceTypePack&) override
     {
         LUAU_ASSERT(false);
         return false;
@@ -1237,12 +1268,14 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
     const ScopePtr& parentScope, std::function<void(const ModuleName&, const ScopePtr&)> prepareModuleScope, FrontendOptions options,
     TypeCheckLimits limits, bool recordJsonLog, std::function<void(const ModuleName&, std::string)> writeJsonLog)
 {
+    LUAU_TIMETRACE_SCOPE("Frontend::check", "Typechecking");
+    LUAU_TIMETRACE_ARGUMENT("module", sourceModule.name.c_str());
+    LUAU_TIMETRACE_ARGUMENT("name", sourceModule.humanReadableName.c_str());
+
     ModulePtr result = std::make_shared<Module>();
     result->name = sourceModule.name;
     result->humanReadableName = sourceModule.humanReadableName;
-
-    result->mode = sourceModule.mode.value_or(Mode::NoCheck);
-
+    result->mode = mode;
     result->internalTypes.owningModule = result.get();
     result->interfaceTypes.owningModule = result.get();
 
@@ -1323,10 +1356,19 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
     }
     else
     {
-        if (mode == Mode::Nonstrict)
+        switch (mode)
+        {
+        case Mode::Nonstrict:
             Luau::checkNonStrict(builtinTypes, iceHandler, NotNull{&unifierState}, NotNull{&dfg}, NotNull{&limits}, sourceModule, result.get());
-        else
+            break;
+        case Mode::Definition:
+            // fallthrough intentional
+        case Mode::Strict:
             Luau::check(builtinTypes, NotNull{&unifierState}, NotNull{&limits}, logger.get(), sourceModule, result.get());
+            break;
+        case Mode::NoCheck:
+            break;
+        };
     }
 
     unfreeze(result->interfaceTypes);
