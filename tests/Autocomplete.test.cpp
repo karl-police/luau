@@ -207,7 +207,7 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk4")
 {
     ScopedFastFlag sff[]{
-        {FFlag::DebugLuauDeferredConstraintResolution, false},
+        {FFlag::LuauSolverV2, false},
         {FFlag::DebugLuauLogSolver, true},
     };
 
