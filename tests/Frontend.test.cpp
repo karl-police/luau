@@ -12,7 +12,7 @@
 
 using namespace Luau;
 
-LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
+LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(DebugLuauFreezeArena);
 LUAU_FASTFLAG(DebugLuauMagicTypes);
 
@@ -164,7 +164,7 @@ TEST_CASE_FIXTURE(FrontendFixture, "automatically_check_dependent_scripts")
     auto bExports = first(bModule->returnType);
     REQUIRE(!!bExports);
 
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ("{ b_value: number }", toString(*bExports));
     else
         CHECK_EQ("{| b_value: number |}", toString(*bExports));
@@ -311,7 +311,7 @@ TEST_CASE_FIXTURE(FrontendFixture, "nocheck_cycle_used_by_checked")
     std::optional<TypeId> cExports = first(cModule->returnType);
     REQUIRE(bool(cExports));
 
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ("{ a: { hello: any }, b: { hello: any } }", toString(*cExports));
     else
         CHECK_EQ("{| a: any, b: any |}", toString(*cExports));
@@ -485,13 +485,13 @@ return {mod_b = 2}
     LUAU_REQUIRE_ERRORS(resultB);
 
     TypeId tyB = requireExportedType("game/B", "btype");
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ(toString(tyB, opts), "{ x: number }");
     else
         CHECK_EQ(toString(tyB, opts), "{| x: number |}");
 
     TypeId tyA = requireExportedType("game/A", "atype");
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ(toString(tyA, opts), "{ x: any }");
     else
         CHECK_EQ(toString(tyA, opts), "{| x: any |}");
@@ -501,13 +501,13 @@ return {mod_b = 2}
     LUAU_REQUIRE_ERRORS(resultB);
 
     tyB = requireExportedType("game/B", "btype");
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ(toString(tyB, opts), "{ x: number }");
     else
         CHECK_EQ(toString(tyB, opts), "{| x: number |}");
 
     tyA = requireExportedType("game/A", "atype");
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ(toString(tyA, opts), "{ x: any }");
     else
         CHECK_EQ(toString(tyA, opts), "{| x: any |}");
@@ -583,7 +583,7 @@ TEST_CASE_FIXTURE(FrontendFixture, "recheck_if_dependent_script_is_dirty")
     auto bExports = first(bModule->returnType);
     REQUIRE(!!bExports);
 
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ("{ b_value: string }", toString(*bExports));
     else
         CHECK_EQ("{| b_value: string |}", toString(*bExports));
@@ -714,9 +714,14 @@ TEST_CASE_FIXTURE(FrontendFixture, "report_syntax_error_in_required_file")
 
     CHECK_EQ("Modules/A", result.errors[0].moduleName);
 
-    bool b = std::any_of(begin(result.errors), end(result.errors), [](auto&& e) -> bool {
-        return get<SyntaxError>(e);
-    });
+    bool b = std::any_of(
+        begin(result.errors),
+        end(result.errors),
+        [](auto&& e) -> bool
+        {
+            return get<SyntaxError>(e);
+        }
+    );
     if (!b)
     {
         CHECK_MESSAGE(false, "Expected a syntax error!");
@@ -809,8 +814,10 @@ TEST_CASE_FIXTURE(FrontendFixture, "accumulate_cached_errors_in_consistent_order
 
 TEST_CASE_FIXTURE(FrontendFixture, "test_pruneParentSegments")
 {
-    CHECK_EQ(std::optional<std::string>{"Modules/Enum/ButtonState"},
-        pathExprToModuleName("", {"Modules", "LuaApp", "DeprecatedDarkTheme", "Parent", "Parent", "Enum", "ButtonState"}));
+    CHECK_EQ(
+        std::optional<std::string>{"Modules/Enum/ButtonState"},
+        pathExprToModuleName("", {"Modules", "LuaApp", "DeprecatedDarkTheme", "Parent", "Parent", "Enum", "ButtonState"})
+    );
     CHECK_EQ(std::optional<std::string>{"workspace/Foo/Bar/Baz"}, pathExprToModuleName("workspace/Foo/Quux", {"script", "Parent", "Bar", "Baz"}));
     CHECK_EQ(std::nullopt, pathExprToModuleName("", {}));
     CHECK_EQ(std::optional<std::string>{"script"}, pathExprToModuleName("", {"script"}));
@@ -910,21 +917,24 @@ TEST_CASE_FIXTURE(FrontendFixture, "it_should_be_safe_to_stringify_errors_when_f
     // When this test fails, it is because the TypeIds needed by the error have been deallocated.
     // It is thus basically impossible to predict what will happen when this assert is evaluated.
     // It could segfault, or you could see weird type names like the empty string or <VALUELESS BY EXCEPTION>
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         REQUIRE_EQ(
             R"(Type
     '{ count: string }'
 could not be converted into
-    '{ Count: number }')", toString(result.errors[0]));
+    '{ Count: number }')",
+            toString(result.errors[0])
+        );
     else
         REQUIRE_EQ(
-            "Table type 'a' not compatible with type '{| Count: number |}' because the former is missing field 'Count'", toString(result.errors[0]));
+            "Table type 'a' not compatible with type '{| Count: number |}' because the former is missing field 'Count'", toString(result.errors[0])
+        );
 }
 
 TEST_CASE_FIXTURE(FrontendFixture, "trace_requires_in_nonstrict_mode")
 {
     // The new non-strict mode is not currently expected to signal any errors here.
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         return;
 
     fileResolver.source["Module/A"] = R"(
@@ -960,10 +970,15 @@ TEST_CASE_FIXTURE(FrontendFixture, "environments")
     ScopePtr testScope = frontend.addEnvironment("test");
 
     unfreeze(frontend.globals.globalTypes);
-    frontend.loadDefinitionFile(frontend.globals, testScope, R"(
+    frontend.loadDefinitionFile(
+        frontend.globals,
+        testScope,
+        R"(
         export type Foo = number | string
     )",
-        "@test", /* captureComments */ false);
+        "@test",
+        /* captureComments */ false
+    );
     freeze(frontend.globals.globalTypes);
 
     fileResolver.source["A"] = R"(
@@ -988,7 +1003,7 @@ TEST_CASE_FIXTURE(FrontendFixture, "environments")
 
     CheckResult resultB = frontend.check("B");
     // In the new non-strict mode, we do not currently support error reporting for unknown symbols in type positions.
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         LUAU_REQUIRE_NO_ERRORS(resultB);
     else
         LUAU_REQUIRE_ERROR_COUNT(1, resultB);
@@ -1096,7 +1111,7 @@ TEST_CASE_FIXTURE(FrontendFixture, "typecheck_twice_for_ast_types")
 TEST_CASE_FIXTURE(FrontendFixture, "imported_table_modification_2")
 {
     // This test describes non-strict mode behavior that is just not currently present in the new non-strict mode.
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         return;
 
     frontend.options.retainFullTypeGraphs = false;
@@ -1230,7 +1245,8 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "reexport_type_alias")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "module_scope_check")
 {
-    frontend.prepareModuleScope = [this](const ModuleName& name, const ScopePtr& scope, bool forAutocomplete) {
+    frontend.prepareModuleScope = [this](const ModuleName& name, const ScopePtr& scope, bool forAutocomplete)
+    {
         scope->bindings[Luau::AstName{"x"}] = Luau::Binding{frontend.globals.builtinTypes->numberType};
     };
 
@@ -1359,7 +1375,7 @@ TEST_CASE_FIXTURE(FrontendFixture, "checked_modules_have_the_correct_mode")
 
 TEST_CASE_FIXTURE(FrontendFixture, "separate_caches_for_autocomplete")
 {
-    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, false};
+    ScopedFastFlag sff{FFlag::LuauSolverV2, false};
 
     fileResolver.source["game/A"] = R"(
         --!nonstrict
@@ -1389,7 +1405,7 @@ TEST_CASE_FIXTURE(FrontendFixture, "separate_caches_for_autocomplete")
 
 TEST_CASE_FIXTURE(FrontendFixture, "no_separate_caches_with_the_new_solver")
 {
-    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
+    ScopedFastFlag sff{FFlag::LuauSolverV2, true};
 
     fileResolver.source["game/A"] = R"(
         --!nonstrict

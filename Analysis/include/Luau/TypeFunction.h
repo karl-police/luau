@@ -32,6 +32,9 @@ struct TypeFunctionContext
     // The constraint being reduced in this run of the reduction
     const Constraint* constraint;
 
+    std::optional<AstName> userFuncName;          // Name of the user-defined type function; only available for UDTFs
+    std::optional<AstExprFunction*> userFuncBody; // Body of the user-defined type function; only available for UDTFs
+
     TypeFunctionContext(NotNull<ConstraintSolver> cs, NotNull<Scope> scope, NotNull<const Constraint> constraint)
         : arena(cs->arena)
         , builtins(cs->builtinTypes)
@@ -44,8 +47,14 @@ struct TypeFunctionContext
     {
     }
 
-    TypeFunctionContext(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtins, NotNull<Scope> scope, NotNull<Normalizer> normalizer,
-        NotNull<InternalErrorReporter> ice, NotNull<TypeCheckLimits> limits)
+    TypeFunctionContext(
+        NotNull<TypeArena> arena,
+        NotNull<BuiltinTypes> builtins,
+        NotNull<Scope> scope,
+        NotNull<Normalizer> normalizer,
+        NotNull<InternalErrorReporter> ice,
+        NotNull<TypeCheckLimits> limits
+    )
         : arena(arena)
         , builtins(builtins)
         , scope(scope)
@@ -149,6 +158,8 @@ FunctionGraphReductionResult reduceTypeFunctions(TypePackId entrypoint, Location
 struct BuiltinTypeFunctions
 {
     BuiltinTypeFunctions();
+
+    TypeFunction userFunc;
 
     TypeFunction notFunc;
     TypeFunction lenFunc;

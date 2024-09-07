@@ -67,7 +67,7 @@ struct NonStrictTypeCheckerFixture : Fixture
     CheckResult checkNonStrict(const std::string& code)
     {
         ScopedFastFlag flags[] = {
-            {FFlag::DebugLuauDeferredConstraintResolution, true},
+            {FFlag::LuauSolverV2, true},
         };
         LoadDefinitionFileResult res = loadDefinition(definitions);
         LUAU_ASSERT(res.success);
@@ -77,7 +77,7 @@ struct NonStrictTypeCheckerFixture : Fixture
     CheckResult checkNonStrictModule(const std::string& moduleName)
     {
         ScopedFastFlag flags[] = {
-            {FFlag::DebugLuauDeferredConstraintResolution, true},
+            {FFlag::LuauSolverV2, true},
         };
         LoadDefinitionFileResult res = loadDefinition(definitions);
         LUAU_ASSERT(res.success);
@@ -531,10 +531,12 @@ optionalArgsAtTheEnd2("a", "b", "c") -- error
 
 TEST_CASE_FIXTURE(NonStrictTypeCheckerFixture, "non_testable_type_throws_ice")
 {
-    CHECK_THROWS_AS(checkNonStrict(R"(
+    CHECK_THROWS_AS(
+        checkNonStrict(R"(
 os.time({year = 0, month = 0, day = 0, min = 0, isdst = nil})
 )"),
-        Luau::InternalCompilerError);
+        Luau::InternalCompilerError
+    );
 }
 
 TEST_CASE_FIXTURE(NonStrictTypeCheckerFixture, "non_strict_shouldnt_warn_on_require_module")

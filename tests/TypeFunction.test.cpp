@@ -12,7 +12,8 @@
 
 using namespace Luau;
 
-LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
+LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(LuauUserDefinedTypeFunctions)
 LUAU_DYNAMIC_FASTINT(LuauTypeFamilyApplicationCartesianProductLimit)
 
 struct TypeFunctionFixture : Fixture
@@ -22,10 +23,12 @@ struct TypeFunctionFixture : Fixture
     TypeFunctionFixture()
         : Fixture(true, false)
     {
-        swapFunction = TypeFunction{/* name */ "Swap",
+        swapFunction = TypeFunction{
+            /* name */ "Swap",
             /* reducer */
-            [](TypeId instance, const std::vector<TypeId>& tys, const std::vector<TypePackId>& tps,
-                NotNull<TypeFunctionContext> ctx) -> TypeFunctionReductionResult<TypeId> {
+            [](TypeId instance, const std::vector<TypeId>& tys, const std::vector<TypePackId>& tps, NotNull<TypeFunctionContext> ctx
+            ) -> TypeFunctionReductionResult<TypeId>
+            {
                 LUAU_ASSERT(tys.size() == 1);
                 TypeId param = follow(tys.at(0));
 
@@ -46,7 +49,8 @@ struct TypeFunctionFixture : Fixture
                 {
                     return TypeFunctionReductionResult<TypeId>{std::nullopt, true, {}, {}};
                 }
-            }};
+            }
+        };
 
         unfreeze(frontend.globals.globalTypes);
         TypeId t = frontend.globals.globalTypes.addType(GenericType{"T"});
@@ -63,7 +67,7 @@ TEST_SUITE_BEGIN("TypeFunctionTests");
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "basic_type_function")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -85,7 +89,7 @@ TEST_CASE_FIXTURE(TypeFunctionFixture, "basic_type_function")
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "function_as_fn_ret")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -104,7 +108,7 @@ TEST_CASE_FIXTURE(TypeFunctionFixture, "function_as_fn_ret")
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "function_as_fn_arg")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -114,16 +118,15 @@ TEST_CASE_FIXTURE(TypeFunctionFixture, "function_as_fn_arg")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    // FIXME: Can we constrain these to `never` or `unknown`?
-    CHECK("a" == toString(requireType("a")));
-    CHECK("a" == toString(requireType("b")));
-    CHECK("Type function instance Swap<a> is uninhabited" == toString(result.errors[0]));
-    CHECK("Type function instance Swap<a> is uninhabited" == toString(result.errors[1]));
+    CHECK("unknown" == toString(requireType("a")));
+    CHECK("unknown" == toString(requireType("b")));
+    CHECK("Type 'number' could not be converted into 'never'" == toString(result.errors[0]));
+    CHECK("Type 'boolean' could not be converted into 'never'" == toString(result.errors[1]));
 }
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "resolve_deep_functions")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -136,7 +139,7 @@ TEST_CASE_FIXTURE(TypeFunctionFixture, "resolve_deep_functions")
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "unsolvable_function")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -145,16 +148,18 @@ TEST_CASE_FIXTURE(TypeFunctionFixture, "unsolvable_function")
         local b = impossible(true)
     )");
 
-    LUAU_REQUIRE_ERROR_COUNT(2, result);
-    for (size_t i = 0; i < 2; ++i)
-    {
-        CHECK(toString(result.errors[i]) == "Type function instance Swap<a> is uninhabited");
-    }
+    LUAU_REQUIRE_ERROR_COUNT(6, result);
+    CHECK(toString(result.errors[0]) == "Type function instance Swap<Swap<T>> is uninhabited");
+    CHECK(toString(result.errors[1]) == "Type function instance Swap<T> is uninhabited");
+    CHECK(toString(result.errors[2]) == "Type function instance Swap<Swap<T>> is uninhabited");
+    CHECK(toString(result.errors[3]) == "Type function instance Swap<T> is uninhabited");
+    CHECK(toString(result.errors[4]) == "Type function instance Swap<Swap<T>> is uninhabited");
+    CHECK(toString(result.errors[5]) == "Type function instance Swap<T> is uninhabited");
 }
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "table_internal_functions")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -174,7 +179,7 @@ TEST_CASE_FIXTURE(TypeFunctionFixture, "table_internal_functions")
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "function_internal_functions")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -195,7 +200,7 @@ TEST_CASE_FIXTURE(TypeFunctionFixture, "function_internal_functions")
 
 TEST_CASE_FIXTURE(Fixture, "add_function_at_work")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -210,15 +215,21 @@ TEST_CASE_FIXTURE(Fixture, "add_function_at_work")
 
     LUAU_REQUIRE_ERROR_COUNT(2, result);
     CHECK(toString(requireType("a")) == "number");
-    CHECK(toString(requireType("b")) == "Add<number, string>");
-    CHECK(toString(requireType("c")) == "Add<string, number>");
-    CHECK(toString(result.errors[0]) == "Type function instance Add<number, string> is uninhabited");
-    CHECK(toString(result.errors[1]) == "Type function instance Add<string, number> is uninhabited");
+    CHECK(toString(requireType("b")) == "add<number, string>");
+    CHECK(toString(requireType("c")) == "add<string, number>");
+    CHECK(
+        toString(result.errors[0]) ==
+        "Operator '+' could not be applied to operands of types number and string; there is no corresponding overload for __add"
+    );
+    CHECK(
+        toString(result.errors[1]) ==
+        "Operator '+' could not be applied to operands of types string and number; there is no corresponding overload for __add"
+    );
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "cyclic_add_function_at_work")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -231,7 +242,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "cyclic_add_function_at_work")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "mul_function_with_union_of_multiplicatives")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     loadDefinition(R"(
@@ -254,7 +265,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "mul_function_with_union_of_multiplicatives")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "mul_function_with_union_of_multiplicatives_2")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     loadDefinition(R"(
@@ -274,7 +285,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "mul_function_with_union_of_multiplicatives_2
 
 TEST_CASE_FIXTURE(Fixture, "internal_functions_raise_errors")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -284,13 +295,15 @@ TEST_CASE_FIXTURE(Fixture, "internal_functions_raise_errors")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    CHECK(toString(result.errors[0]) == "Type function instance Add<a, b> depends on generic function parameters but does not appear in the function "
-                                        "signature; this construct cannot be type-checked at this time");
+    CHECK(
+        toString(result.errors[0]) ==
+        "Operator '+' could not be applied to operands of types unknown and unknown; there is no corresponding overload for __add"
+    );
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "type_functions_can_be_shadowed")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -315,7 +328,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "type_functions_can_be_shadowed")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "type_functions_inhabited_with_normalization")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -333,7 +346,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "type_functions_inhabited_with_normalization"
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_works")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -354,7 +367,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_works")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_works_with_metatables")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -377,7 +390,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_works_with_metatables")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_errors_if_it_has_nontable_part")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -395,7 +408,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_errors_if_it_has_nontabl
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_string_indexer")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -423,7 +436,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_string_indexer")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_common_subset_if_union_of_differing_tables")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -444,7 +457,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_common_subset_if_union_o
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_never_for_empty_table")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -459,7 +472,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_type_function_never_for_empty_table")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_works")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -480,7 +493,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_works")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_ignores_metatables")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -503,7 +516,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_ignores_metatables")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_errors_if_it_has_nontable_part")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -521,7 +534,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_errors_if_it_has_nont
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_common_subset_if_union_of_differing_tables")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -542,7 +555,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_common_subset_if_unio
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_never_for_empty_table")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -557,7 +570,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawkeyof_type_function_never_for_empty_table
 
 TEST_CASE_FIXTURE(ClassFixture, "keyof_type_function_works_on_classes")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -577,7 +590,7 @@ TEST_CASE_FIXTURE(ClassFixture, "keyof_type_function_works_on_classes")
 
 TEST_CASE_FIXTURE(ClassFixture, "keyof_type_function_errors_if_it_has_nonclass_part")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -594,7 +607,7 @@ TEST_CASE_FIXTURE(ClassFixture, "keyof_type_function_errors_if_it_has_nonclass_p
 
 TEST_CASE_FIXTURE(ClassFixture, "keyof_type_function_common_subset_if_union_of_differing_classes")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -606,9 +619,23 @@ TEST_CASE_FIXTURE(ClassFixture, "keyof_type_function_common_subset_if_union_of_d
     LUAU_REQUIRE_NO_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(ClassFixture, "keyof_type_function_works_with_parent_classes_too")
+{
+    if (!FFlag::LuauSolverV2)
+        return;
+
+    CheckResult result = check(R"(
+        type KeysOfMyObject = keyof<ChildClass>
+
+        local function ok(idx: KeysOfMyObject): "BaseField" | "BaseMethod" | "Method" | "Touched" return idx end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(ClassFixture, "binary_type_function_works_with_default_argument")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -623,7 +650,7 @@ TEST_CASE_FIXTURE(ClassFixture, "binary_type_function_works_with_default_argumen
 
 TEST_CASE_FIXTURE(ClassFixture, "vector2_multiply_is_overloaded")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -646,7 +673,7 @@ TEST_CASE_FIXTURE(ClassFixture, "vector2_multiply_is_overloaded")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_rfc_example")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -677,7 +704,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_rfc_example")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_oss_crash_gh1161")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -695,8 +722,9 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_oss_crash_gh1161")
         fnB(result)
     )");
 
-    LUAU_REQUIRE_ERROR_COUNT(1, result);
-    CHECK(get<FunctionExitsWithoutReturning>(result.errors[0]));
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    CHECK(get<ConstraintSolvingIncompleteError>(result.errors[0]));
+    CHECK(get<FunctionExitsWithoutReturning>(result.errors[1]));
 }
 
 TEST_CASE_FIXTURE(TypeFunctionFixture, "fuzzer_numeric_binop_doesnt_assert_on_generalizeFreeType")
@@ -716,7 +744,7 @@ _(setmetatable(_,{[...]=_,}))
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "cyclic_concat_function_at_work")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -729,7 +757,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "cyclic_concat_function_at_work")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "exceeded_distributivity_limits")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     ScopedFastInt sfi{DFInt::LuauTypeFamilyApplicationCartesianProductLimit, 10};
@@ -762,7 +790,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "exceeded_distributivity_limits")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "didnt_quite_exceed_distributivity_limits")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     // We duplicate the test here because we want to make sure the test failed
@@ -796,7 +824,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "didnt_quite_exceed_distributivity_limits")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "ensure_equivalence_with_distributivity")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     loadDefinition(R"(
@@ -829,7 +857,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "ensure_equivalence_with_distributivity")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "we_shouldnt_warn_that_a_reducible_type_function_is_uninhabited")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -859,7 +887,7 @@ end
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -882,7 +910,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_array")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -897,7 +925,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_array")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_generic_types")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -919,7 +947,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_generic_types")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_errors_w_bad_indexer")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -935,7 +963,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_errors_w_bad_indexer")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_errors_w_var_indexer")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -952,7 +980,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_errors_w_var_indexer")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_union_type_indexer")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -970,7 +998,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_union_type_index
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_union_type_indexee")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -989,7 +1017,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_union_type_index
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_rfc_alternative_section")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1007,7 +1035,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_rfc_alternative_section"
 
 TEST_CASE_FIXTURE(ClassFixture, "index_type_function_works_on_classes")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1019,9 +1047,23 @@ TEST_CASE_FIXTURE(ClassFixture, "index_type_function_works_on_classes")
     LUAU_REQUIRE_NO_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(ClassFixture, "index_type_function_works_on_classes_with_parents")
+{
+    if (!FFlag::LuauSolverV2)
+        return;
+
+    CheckResult result = check(R"(
+        type KeysOfMyObject = index<ChildClass, "BaseField">
+
+        local function ok(idx: KeysOfMyObject): number return idx end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_index_metatables")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1047,7 +1089,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "index_type_function_works_w_index_metatables
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1069,7 +1111,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_array")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1083,7 +1125,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_array")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_errors_w_var_indexer")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1099,7 +1141,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_errors_w_var_indexer")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_union_type_indexer")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1115,7 +1157,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_union_type_inde
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_union_type_indexee")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1132,7 +1174,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_union_type_inde
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_index_metatables")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1152,7 +1194,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "rawget_type_function_works_w_index_metatable
 
 TEST_CASE_FIXTURE(ClassFixture, "rawget_type_function_errors_w_classes")
 {
-    if (!FFlag::DebugLuauDeferredConstraintResolution)
+    if (!FFlag::LuauSolverV2)
         return;
 
     CheckResult result = check(R"(
@@ -1161,6 +1203,20 @@ TEST_CASE_FIXTURE(ClassFixture, "rawget_type_function_errors_w_classes")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK(toString(result.errors[0]) == "Property '\"BaseField\"' does not exist on type 'BaseClass'");
+}
+
+TEST_CASE_FIXTURE(Fixture, "user_defined_type_function_errors")
+{
+    if (!FFlag::LuauUserDefinedTypeFunctions)
+        return;
+
+    CheckResult result = check(R"(
+    type function foo()
+        return nil
+    end
+    )");
+    LUAU_CHECK_ERROR_COUNT(1, result);
+    CHECK(toString(result.errors[0]) == "This syntax is not supported");
 }
 
 TEST_SUITE_END();

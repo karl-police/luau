@@ -162,6 +162,7 @@ private:
     ControlFlow visit(DfgScope* scope, AstStatFunction* f);
     ControlFlow visit(DfgScope* scope, AstStatLocalFunction* l);
     ControlFlow visit(DfgScope* scope, AstStatTypeAlias* t);
+    ControlFlow visit(DfgScope* scope, AstStatTypeFunction* f);
     ControlFlow visit(DfgScope* scope, AstStatDeclareGlobal* d);
     ControlFlow visit(DfgScope* scope, AstStatDeclareFunction* d);
     ControlFlow visit(DfgScope* scope, AstStatDeclareClass* d);
@@ -183,9 +184,9 @@ private:
     DataFlowResult visitExpr(DfgScope* scope, AstExprInterpString* i);
     DataFlowResult visitExpr(DfgScope* scope, AstExprError* error);
 
-    void visitLValue(DfgScope* scope, AstExpr* e, DefId incomingDef, bool isCompoundAssignment = false);
-    DefId visitLValue(DfgScope* scope, AstExprLocal* l, DefId incomingDef, bool isCompoundAssignment);
-    DefId visitLValue(DfgScope* scope, AstExprGlobal* g, DefId incomingDef, bool isCompoundAssignment);
+    void visitLValue(DfgScope* scope, AstExpr* e, DefId incomingDef);
+    DefId visitLValue(DfgScope* scope, AstExprLocal* l, DefId incomingDef);
+    DefId visitLValue(DfgScope* scope, AstExprGlobal* g, DefId incomingDef);
     DefId visitLValue(DfgScope* scope, AstExprIndexName* i, DefId incomingDef);
     DefId visitLValue(DfgScope* scope, AstExprIndexExpr* i, DefId incomingDef);
     DefId visitLValue(DfgScope* scope, AstExprError* e, DefId incomingDef);

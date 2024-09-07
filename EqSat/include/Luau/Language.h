@@ -7,7 +7,6 @@
 #include "Luau/Variant.h"
 
 #include <array>
-#include <algorithm>
 #include <type_traits>
 #include <utility>
 
@@ -233,12 +232,6 @@ struct Language final
     {
     }
 
-    Language(const Language&) noexcept = default;
-    Language& operator=(const Language&) noexcept = default;
-
-    Language(Language&&) noexcept = default;
-    Language& operator=(Language&&) noexcept = default;
-
     int index() const noexcept
     {
         return v.index();
@@ -248,16 +241,24 @@ struct Language final
     /// Reading is ok, but you should also never assume that these `Id`s are stable.
     Slice<Id> operands() noexcept
     {
-        return visit([](auto&& v) -> Slice<Id> {
-            return v.operands();
-        }, v);
+        return visit(
+            [](auto&& v) -> Slice<Id>
+            {
+                return v.operands();
+            },
+            v
+        );
     }
 
     Slice<const Id> operands() const noexcept
     {
-        return visit([](auto&& v) -> Slice<const Id> {
-            return v.operands();
-        }, v);
+        return visit(
+            [](auto&& v) -> Slice<const Id>
+            {
+                return v.operands();
+            },
+            v
+        );
     }
 
     template<typename T>
@@ -290,9 +291,16 @@ public:
         size_t operator()(const Language& language) const
         {
             size_t seed = std::hash<int>{}(language.index());
-            hashCombine(seed, visit([](auto&& v) {
-                return typename std::decay_t<decltype(v)>::Hash{}(v);
-            }, language.v));
+            hashCombine(
+                seed,
+                visit(
+                    [](auto&& v)
+                    {
+                        return typename std::decay_t<decltype(v)>::Hash{}(v);
+                    },
+                    language.v
+                )
+            );
             return seed;
         }
     };

@@ -292,13 +292,19 @@ TEST_CASE_FIXTURE(Fixture, "substitution_skip_failure")
     TypeId root = &ttvTweenResult;
 
     ModulePtr currentModule = std::make_shared<Module>();
-    Anyification anyification(&currentModule->internalTypes, frontend.globals.globalScope, builtinTypes, &frontend.iceHandler, builtinTypes->anyType,
-        builtinTypes->anyTypePack);
+    Anyification anyification(
+        &currentModule->internalTypes,
+        frontend.globals.globalScope,
+        builtinTypes,
+        &frontend.iceHandler,
+        builtinTypes->anyType,
+        builtinTypes->anyTypePack
+    );
     std::optional<TypeId> any = anyification.substitute(root);
 
     REQUIRE(!anyification.normalizationTooComplex);
     REQUIRE(any.has_value());
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ("{ f: t1 } where t1 = () -> { f: () -> { f: ({ f: t1 }) -> (), signal: { f: (any) -> () } } }", toString(*any));
     else
         CHECK_EQ("{| f: t1 |} where t1 = () -> {| f: () -> {| f: ({| f: t1 |}) -> (), signal: {| f: (any) -> () |} |} |}", toString(*any));

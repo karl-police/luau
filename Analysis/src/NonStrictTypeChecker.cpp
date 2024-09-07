@@ -69,7 +69,11 @@ struct NonStrictContext
     NonStrictContext& operator=(NonStrictContext&&) = default;
 
     static NonStrictContext disjunction(
-        NotNull<BuiltinTypes> builtinTypes, NotNull<TypeArena> arena, const NonStrictContext& left, const NonStrictContext& right)
+        NotNull<BuiltinTypes> builtinTypes,
+        NotNull<TypeArena> arena,
+        const NonStrictContext& left,
+        const NonStrictContext& right
+    )
     {
         // disjunction implements union over the domain of keys
         // if the default value for a defId not in the map is `never`
@@ -94,7 +98,11 @@ struct NonStrictContext
     }
 
     static NonStrictContext conjunction(
-        NotNull<BuiltinTypes> builtins, NotNull<TypeArena> arena, const NonStrictContext& left, const NonStrictContext& right)
+        NotNull<BuiltinTypes> builtins,
+        NotNull<TypeArena> arena,
+        const NonStrictContext& left,
+        const NonStrictContext& right
+    )
     {
         NonStrictContext conj{};
 
@@ -160,14 +168,21 @@ struct NonStrictTypeChecker
 
     const NotNull<TypeCheckLimits> limits;
 
-    NonStrictTypeChecker(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtinTypes, const NotNull<InternalErrorReporter> ice,
-        NotNull<UnifierSharedState> unifierState, NotNull<const DataFlowGraph> dfg, NotNull<TypeCheckLimits> limits, Module* module)
+    NonStrictTypeChecker(
+        NotNull<TypeArena> arena,
+        NotNull<BuiltinTypes> builtinTypes,
+        const NotNull<InternalErrorReporter> ice,
+        NotNull<UnifierSharedState> unifierState,
+        NotNull<const DataFlowGraph> dfg,
+        NotNull<TypeCheckLimits> limits,
+        Module* module
+    )
         : builtinTypes(builtinTypes)
         , ice(ice)
         , arena(arena)
         , module(module)
         , normalizer{arena, builtinTypes, unifierState, /* cache inhabitance */ true}
-        , subtyping{builtinTypes, arena, NotNull(&normalizer), ice, NotNull{module->getModuleScope().get()}}
+        , subtyping{builtinTypes, arena, NotNull(&normalizer), ice}
         , dfg(dfg)
         , limits(limits)
     {
@@ -213,7 +228,8 @@ struct NonStrictTypeChecker
             return instance;
 
         ErrorVec errors =
-            reduceTypeFunctions(instance, location, TypeFunctionContext{arena, builtinTypes, stack.back(), NotNull{&normalizer}, ice, limits}, true).errors;
+            reduceTypeFunctions(instance, location, TypeFunctionContext{arena, builtinTypes, stack.back(), NotNull{&normalizer}, ice, limits}, true)
+                .errors;
 
         if (errors.empty())
             noTypeFunctionErrors.insert(instance);
@@ -271,6 +287,8 @@ struct NonStrictTypeChecker
             return visit(s);
         else if (auto s = stat->as<AstStatTypeAlias>())
             return visit(s);
+        else if (auto f = stat->as<AstStatTypeFunction>())
+            return visit(f);
         else if (auto s = stat->as<AstStatDeclareFunction>())
             return visit(s);
         else if (auto s = stat->as<AstStatDeclareGlobal>())
@@ -395,6 +413,12 @@ struct NonStrictTypeChecker
         return {};
     }
 
+    NonStrictContext visit(AstStatTypeFunction* typeFunc)
+    {
+        reportError(GenericError{"This syntax is not supported"}, typeFunc->location);
+        return {};
+    }
+
     NonStrictContext visit(AstStatDeclareFunction* declFn)
     {
         return {};
@@ -507,7 +531,7 @@ struct NonStrictTypeChecker
     NonStrictContext visit(AstExprCall* call)
     {
         NonStrictContext fresh{};
-        TypeId* originalCallTy = module->astOriginalCallTypes.find(call);
+        TypeId* originalCallTy = module->astOriginalCallTypes.find(call->func);
         if (!originalCallTy)
             return fresh;
 
@@ -675,6 +699,7 @@ struct NonStrictTypeChecker
     // If this fragment of the ast will run time error, return the type that causes this
     std::optional<TypeId> willRunTimeError(AstExpr* fragment, const NonStrictContext& context)
     {
+        NotNull<Scope> scope{Luau::findScopeAtPosition(*module, fragment->location.end).get()};
         DefId def = dfg->getDef(fragment);
         std::vector<DefId> defs;
         collectOperands(def, &defs);
@@ -684,7 +709,7 @@ struct NonStrictTypeChecker
             {
 
                 TypeId actualType = lookupType(fragment);
-                SubtypingResult r = subtyping.isSubtype(actualType, *contextTy);
+                SubtypingResult r = subtyping.isSubtype(actualType, *contextTy, scope);
                 if (r.normalizationTooComplex)
                     reportError(NormalizationTooComplex{}, fragment->location);
                 if (r.isSubtype)
@@ -697,6 +722,7 @@ struct NonStrictTypeChecker
 
     std::optional<TypeId> willRunTimeErrorFunctionDefinition(AstLocal* fragment, const NonStrictContext& context)
     {
+        NotNull<Scope> scope{Luau::findScopeAtPosition(*module, fragment->location.end).get()};
         DefId def = dfg->getDef(fragment);
         std::vector<DefId> defs;
         collectOperands(def, &defs);
@@ -704,8 +730,8 @@ struct NonStrictTypeChecker
         {
             if (std::optional<TypeId> contextTy = context.find(def))
             {
-                SubtypingResult r1 = subtyping.isSubtype(builtinTypes->unknownType, *contextTy);
-                SubtypingResult r2 = subtyping.isSubtype(*contextTy, builtinTypes->unknownType);
+                SubtypingResult r1 = subtyping.isSubtype(builtinTypes->unknownType, *contextTy, scope);
+                SubtypingResult r2 = subtyping.isSubtype(*contextTy, builtinTypes->unknownType, scope);
                 if (r1.normalizationTooComplex || r2.normalizationTooComplex)
                     reportError(NormalizationTooComplex{}, fragment->location);
                 bool isUnknown = r1.isSubtype && r2.isSubtype;
@@ -723,11 +749,18 @@ private:
         if (!cachedResult)
             cachedResult = arena->addType(NegationType{baseType});
         return cachedResult;
-    };
+    }
 };
 
-void checkNonStrict(NotNull<BuiltinTypes> builtinTypes, NotNull<InternalErrorReporter> ice, NotNull<UnifierSharedState> unifierState,
-    NotNull<const DataFlowGraph> dfg, NotNull<TypeCheckLimits> limits, const SourceModule& sourceModule, Module* module)
+void checkNonStrict(
+    NotNull<BuiltinTypes> builtinTypes,
+    NotNull<InternalErrorReporter> ice,
+    NotNull<UnifierSharedState> unifierState,
+    NotNull<const DataFlowGraph> dfg,
+    NotNull<TypeCheckLimits> limits,
+    const SourceModule& sourceModule,
+    Module* module
+)
 {
     LUAU_TIMETRACE_SCOPE("checkNonStrict", "Typechecking");
 

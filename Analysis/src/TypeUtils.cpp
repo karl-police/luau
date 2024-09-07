@@ -9,7 +9,7 @@
 
 #include <algorithm>
 
-LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
+LUAU_FASTFLAG(LuauSolverV2);
 
 namespace Luau
 {
@@ -24,7 +24,8 @@ bool occursCheck(TypeId needle, TypeId haystack)
     LUAU_ASSERT(get<BlockedType>(needle) || get<PendingExpansionType>(needle));
     haystack = follow(haystack);
 
-    auto checkHaystack = [needle](TypeId haystack) {
+    auto checkHaystack = [needle](TypeId haystack)
+    {
         return occursCheck(needle, haystack);
     };
 
@@ -92,7 +93,12 @@ std::optional<Property> findTableProperty(NotNull<BuiltinTypes> builtinTypes, Er
 }
 
 std::optional<TypeId> findMetatableEntry(
-    NotNull<BuiltinTypes> builtinTypes, ErrorVec& errors, TypeId type, const std::string& entry, Location location)
+    NotNull<BuiltinTypes> builtinTypes,
+    ErrorVec& errors,
+    TypeId type,
+    const std::string& entry,
+    Location location
+)
 {
     type = follow(type);
 
@@ -120,13 +126,24 @@ std::optional<TypeId> findMetatableEntry(
 }
 
 std::optional<TypeId> findTablePropertyRespectingMeta(
-    NotNull<BuiltinTypes> builtinTypes, ErrorVec& errors, TypeId ty, const std::string& name, Location location)
+    NotNull<BuiltinTypes> builtinTypes,
+    ErrorVec& errors,
+    TypeId ty,
+    const std::string& name,
+    Location location
+)
 {
     return findTablePropertyRespectingMeta(builtinTypes, errors, ty, name, ValueContext::RValue, location);
 }
 
 std::optional<TypeId> findTablePropertyRespectingMeta(
-    NotNull<BuiltinTypes> builtinTypes, ErrorVec& errors, TypeId ty, const std::string& name, ValueContext context, Location location)
+    NotNull<BuiltinTypes> builtinTypes,
+    ErrorVec& errors,
+    TypeId ty,
+    const std::string& name,
+    ValueContext context,
+    Location location
+)
 {
     if (get<AnyType>(ty))
         return ty;
@@ -136,7 +153,7 @@ std::optional<TypeId> findTablePropertyRespectingMeta(
         const auto& it = tableType->props.find(name);
         if (it != tableType->props.end())
         {
-            if (FFlag::DebugLuauDeferredConstraintResolution)
+            if (FFlag::LuauSolverV2)
             {
                 switch (context)
                 {
@@ -217,7 +234,12 @@ std::pair<size_t, std::optional<size_t>> getParameterExtents(const TxnLog* log, 
 }
 
 TypePack extendTypePack(
-    TypeArena& arena, NotNull<BuiltinTypes> builtinTypes, TypePackId pack, size_t length, std::vector<std::optional<TypeId>> overrides)
+    TypeArena& arena,
+    NotNull<BuiltinTypes> builtinTypes,
+    TypePackId pack,
+    size_t length,
+    std::vector<std::optional<TypeId>> overrides
+)
 {
     TypePack result;
 
@@ -279,6 +301,8 @@ TypePack extendTypePack(
 
             TypePack newPack;
             newPack.tail = arena.freshTypePack(ftp->scope);
+            if (FFlag::LuauSolverV2)
+                result.tail = newPack.tail;
             size_t overridesIndex = 0;
             while (result.head.size() < length)
             {
@@ -289,7 +313,7 @@ TypePack extendTypePack(
                 }
                 else
                 {
-                    if (FFlag::DebugLuauDeferredConstraintResolution)
+                    if (FFlag::LuauSolverV2)
                     {
                         FreeType ft{ftp->scope, builtinTypes->neverType, builtinTypes->unknownType};
                         t = arena.addType(ft);
@@ -402,7 +426,7 @@ TypeId stripNil(NotNull<BuiltinTypes> builtinTypes, TypeArena& arena, TypeId ty)
 
 ErrorSuppression shouldSuppressErrors(NotNull<Normalizer> normalizer, TypeId ty)
 {
-    LUAU_ASSERT(FFlag::DebugLuauDeferredConstraintResolution);
+    LUAU_ASSERT(FFlag::LuauSolverV2);
     std::shared_ptr<const NormalizedType> normType = normalizer->normalize(ty);
 
     if (!normType)

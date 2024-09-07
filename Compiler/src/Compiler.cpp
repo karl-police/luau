@@ -26,9 +26,6 @@ LUAU_FASTINTVARIABLE(LuauCompileInlineThreshold, 25)
 LUAU_FASTINTVARIABLE(LuauCompileInlineThresholdMaxBoost, 300)
 LUAU_FASTINTVARIABLE(LuauCompileInlineDepth, 5)
 
-LUAU_FASTFLAGVARIABLE(LuauCompileUserdataInfo, false)
-LUAU_FASTFLAGVARIABLE(LuauCompileFastcall3, false)
-
 LUAU_FASTFLAG(LuauNativeAttribute)
 
 namespace Luau
@@ -133,7 +130,8 @@ struct Compiler
 
         if (upvals.size() >= kMaxUpvalueCount)
             CompileError::raise(
-                local->location, "Out of upvalue registers when trying to allocate %s: exceeded limit %d", local->name.value, kMaxUpvalueCount);
+                local->location, "Out of upvalue registers when trying to allocate %s: exceeded limit %d", local->name.value, kMaxUpvalueCount
+            );
 
         // mark local as captured so that closeLocals emits LOP_CLOSEUPVALS accordingly
         Variable* v = variables.find(local);
@@ -456,36 +454,31 @@ struct Compiler
     }
 
     void compileExprFastcallN(
-        AstExprCall* expr, uint8_t target, uint8_t targetCount, bool targetTop, bool multRet, uint8_t regs, int bfid, int bfK = -1)
+        AstExprCall* expr,
+        uint8_t target,
+        uint8_t targetCount,
+        bool targetTop,
+        bool multRet,
+        uint8_t regs,
+        int bfid,
+        int bfK = -1
+    )
     {
         LUAU_ASSERT(!expr->self);
         LUAU_ASSERT(expr->args.size >= 1);
-
-        if (FFlag::LuauCompileFastcall3)
-            LUAU_ASSERT(expr->args.size <= 3);
-        else
-            LUAU_ASSERT(expr->args.size <= 2 || (bfid == LBF_BIT32_EXTRACTK && expr->args.size == 3));
-
+        LUAU_ASSERT(expr->args.size <= 3);
         LUAU_ASSERT(bfid == LBF_BIT32_EXTRACTK ? bfK >= 0 : bfK < 0);
 
         LuauOpcode opc = LOP_NOP;
 
-        if (FFlag::LuauCompileFastcall3)
-        {
-            if (expr->args.size == 1)
-                opc = LOP_FASTCALL1;
-            else if (bfK >= 0 || (expr->args.size == 2 && isConstant(expr->args.data[1])))
-                opc = LOP_FASTCALL2K;
-            else if (expr->args.size == 2)
-                opc = LOP_FASTCALL2;
-            else
-                opc = LOP_FASTCALL3;
-        }
+        if (expr->args.size == 1)
+            opc = LOP_FASTCALL1;
+        else if (bfK >= 0 || (expr->args.size == 2 && isConstant(expr->args.data[1])))
+            opc = LOP_FASTCALL2K;
+        else if (expr->args.size == 2)
+            opc = LOP_FASTCALL2;
         else
-        {
-            opc = expr->args.size == 1 ? LOP_FASTCALL1
-                                       : (bfK >= 0 || (expr->args.size == 2 && isConstant(expr->args.data[1]))) ? LOP_FASTCALL2K : LOP_FASTCALL2;
-        }
+            opc = LOP_FASTCALL3;
 
         uint32_t args[3] = {};
 
@@ -514,7 +507,7 @@ struct Compiler
 
         bytecode.emitABC(opc, uint8_t(bfid), uint8_t(args[0]), 0);
 
-        if (FFlag::LuauCompileFastcall3 && opc == LOP_FASTCALL3)
+        if (opc == LOP_FASTCALL3)
         {
             LUAU_ASSERT(bfK < 0);
             bytecode.emitAux(args[1] | (args[2] << 8));
@@ -556,8 +549,16 @@ struct Compiler
         }
     }
 
-    bool tryCompileInlinedCall(AstExprCall* expr, AstExprFunction* func, uint8_t target, uint8_t targetCount, bool multRet, int thresholdBase,
-        int thresholdMaxBoost, int depthLimit)
+    bool tryCompileInlinedCall(
+        AstExprCall* expr,
+        AstExprFunction* func,
+        uint8_t target,
+        uint8_t targetCount,
+        bool multRet,
+        int thresholdBase,
+        int thresholdMaxBoost,
+        int depthLimit
+    )
     {
         Function* fi = functions.find(func);
         LUAU_ASSERT(fi);
@@ -618,7 +619,8 @@ struct Compiler
         }
 
         bytecode.addDebugRemark(
-            "inlining succeeded (cost %d, profit %.2fx, depth %d)", inlinedCost, double(inlineProfit) / 100, int(inlineFrames.size()));
+            "inlining succeeded (cost %d, profit %.2fx, depth %d)", inlinedCost, double(inlineProfit) / 100, int(inlineFrames.size())
+        );
 
         compileInlinedCall(expr, func, target, targetCount);
         return true;
@@ -784,8 +786,16 @@ struct Compiler
             Function* fi = func ? functions.find(func) : nullptr;
 
             if (fi && fi->canInline &&
-                tryCompileInlinedCall(expr, func, target, targetCount, multRet, FInt::LuauCompileInlineThreshold,
-                    FInt::LuauCompileInlineThresholdMaxBoost, FInt::LuauCompileInlineDepth))
+                tryCompileInlinedCall(
+                    expr,
+                    func,
+                    target,
+                    targetCount,
+                    multRet,
+                    FInt::LuauCompileInlineThreshold,
+                    FInt::LuauCompileInlineThresholdMaxBoost,
+                    FInt::LuauCompileInlineDepth
+                ))
                 return;
 
             // add a debug remark for cases when we didn't even call tryCompileInlinedCall
@@ -859,7 +869,7 @@ struct Compiler
         unsigned maxFastcallArgs = 2;
 
         // Fastcall with 3 arguments is only used if it can help save one or more move instructions
-        if (FFlag::LuauCompileFastcall3 && bfid >= 0 && expr->args.size == 3)
+        if (bfid >= 0 && expr->args.size == 3)
         {
             for (size_t i = 0; i < expr->args.size; ++i)
             {
@@ -872,7 +882,7 @@ struct Compiler
         }
 
         // Optimization: for 1/2/3 argument fast calls use specialized opcodes
-        if (bfid >= 0 && expr->args.size >= 1 && expr->args.size <= (FFlag::LuauCompileFastcall3 ? maxFastcallArgs : 2u))
+        if (bfid >= 0 && expr->args.size >= 1 && expr->args.size <= maxFastcallArgs)
         {
             if (!isExprMultRet(expr->args.data[expr->args.size - 1]))
             {
@@ -2998,7 +3008,8 @@ struct Compiler
         if (unrolledCost > threshold)
         {
             bytecode.addDebugRemark(
-                "loop unroll failed: too expensive (iterations %d, cost %d, profit %.2fx)", tripCount, unrolledCost, double(unrollProfit) / 100);
+                "loop unroll failed: too expensive (iterations %d, cost %d, profit %.2fx)", tripCount, unrolledCost, double(unrollProfit) / 100
+            );
             return false;
         }
 
@@ -3649,9 +3660,12 @@ struct Compiler
         condition->visit(&visitor);
 
         if (visitor.undef)
-            CompileError::raise(condition->location,
+            CompileError::raise(
+                condition->location,
                 "Local %s used in the repeat..until condition is undefined because continue statement on line %d jumps over it",
-                visitor.undef->name.value, cont->location.begin.line + 1);
+                visitor.undef->name.value,
+                cont->location.begin.line + 1
+            );
     }
 
     void gatherConstUpvals(AstExprFunction* func)
@@ -3667,7 +3681,8 @@ struct Compiler
     {
         if (localStack.size() >= kMaxLocalCount)
             CompileError::raise(
-                local->location, "Out of local registers when trying to allocate %s: exceeded limit %d", local->name.value, kMaxLocalCount);
+                local->location, "Out of local registers when trying to allocate %s: exceeded limit %d", local->name.value, kMaxLocalCount
+            );
 
         localStack.push_back(local);
 
@@ -4101,7 +4116,7 @@ struct Compiler
     DenseHashMap<AstLocal*, LuauBytecodeType> localTypes;
     DenseHashMap<AstExpr*, LuauBytecodeType> exprTypes;
 
-    BuiltinTypes builtinTypes;
+    BuiltinAstTypes builtinTypes;
 
     const DenseHashMap<AstExprCall*, int>* builtinsFold = nullptr;
     bool builtinsFoldMathK = false;
@@ -4199,26 +4214,33 @@ void compileOrThrow(BytecodeBuilder& bytecode, const ParseResult& parseResult, c
         predictTableShapes(compiler.tableShapes, root);
     }
 
-    if (FFlag::LuauCompileUserdataInfo)
+    if (const char* const* ptr = options.userdataTypes)
     {
-        if (const char* const* ptr = options.userdataTypes)
+        for (; *ptr; ++ptr)
         {
-            for (; *ptr; ++ptr)
-            {
-                // Type will only resolve to an AstName if it is actually mentioned in the source
-                if (AstName name = names.get(*ptr); name.value)
-                    compiler.userdataTypes[name] = bytecode.addUserdataType(name.value);
-            }
-
-            if (uintptr_t(ptr - options.userdataTypes) > (LBC_TYPE_TAGGED_USERDATA_END - LBC_TYPE_TAGGED_USERDATA_BASE))
-                CompileError::raise(root->location, "Exceeded userdata type limit in the compilation options");
+            // Type will only resolve to an AstName if it is actually mentioned in the source
+            if (AstName name = names.get(*ptr); name.value)
+                compiler.userdataTypes[name] = bytecode.addUserdataType(name.value);
         }
+
+        if (uintptr_t(ptr - options.userdataTypes) > (LBC_TYPE_TAGGED_USERDATA_END - LBC_TYPE_TAGGED_USERDATA_BASE))
+            CompileError::raise(root->location, "Exceeded userdata type limit in the compilation options");
     }
 
     // computes type information for all functions based on type annotations
     if (options.typeInfoLevel >= 1)
-        buildTypeMap(compiler.functionTypes, compiler.localTypes, compiler.exprTypes, root, options.vectorType, compiler.userdataTypes,
-            compiler.builtinTypes, compiler.builtins, compiler.globals, bytecode);
+        buildTypeMap(
+            compiler.functionTypes,
+            compiler.localTypes,
+            compiler.exprTypes,
+            root,
+            options.vectorType,
+            compiler.userdataTypes,
+            compiler.builtinTypes,
+            compiler.builtins,
+            compiler.globals,
+            bytecode
+        );
 
     for (AstExprFunction* expr : functions)
     {
@@ -4231,10 +4253,19 @@ void compileOrThrow(BytecodeBuilder& bytecode, const ParseResult& parseResult, c
             mainFlags |= LPF_NATIVE_FUNCTION;
     }
 
-    AstExprFunction main(root->location, /*attributes=*/AstArray<AstAttr*>({nullptr, 0}), /*generics= */ AstArray<AstGenericType>(),
+    AstExprFunction main(
+        root->location,
+        /*attributes=*/AstArray<AstAttr*>({nullptr, 0}),
+        /*generics= */ AstArray<AstGenericType>(),
         /*genericPacks= */ AstArray<AstGenericTypePack>(),
-        /* self= */ nullptr, AstArray<AstLocal*>(), /* vararg= */ true, /* varargLocation= */ Luau::Location(), root, /* functionDepth= */ 0,
-        /* debugname= */ AstName());
+        /* self= */ nullptr,
+        AstArray<AstLocal*>(),
+        /* vararg= */ true,
+        /* varargLocation= */ Luau::Location(),
+        root,
+        /* functionDepth= */ 0,
+        /* debugname= */ AstName()
+    );
     uint32_t mainid = compiler.compileFunction(&main, mainFlags);
 
     const Compiler::Function* mainf = compiler.functions.find(&main);

@@ -22,7 +22,7 @@
 
 static const char* mainModuleName = "MainModule";
 
-LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
+LUAU_FASTFLAG(LuauSolverV2);
 LUAU_FASTFLAG(DebugLuauFreezeArena);
 LUAU_FASTFLAG(DebugLuauLogSolverToJsonFile)
 
@@ -150,8 +150,11 @@ const Config& TestConfigResolver::getConfig(const ModuleName& name) const
 
 Fixture::Fixture(bool freeze, bool prepareAutocomplete)
     : sff_DebugLuauFreezeArena(FFlag::DebugLuauFreezeArena, freeze)
-    , frontend(&fileResolver, &configResolver,
-          {/* retainFullTypeGraphs= */ true, /* forAutocomplete */ false, /* runLintChecks */ false, /* randomConstraintResolutionSeed */ randomSeed})
+    , frontend(
+          &fileResolver,
+          &configResolver,
+          {/* retainFullTypeGraphs= */ true, /* forAutocomplete */ false, /* runLintChecks */ false, /* randomConstraintResolutionSeed */ randomSeed}
+      )
     , builtinTypes(frontend.builtinTypes)
 {
     configResolver.defaultConfig.mode = Mode::Strict;
@@ -165,7 +168,8 @@ Fixture::Fixture(bool freeze, bool prepareAutocomplete)
 
     if (FFlag::DebugLuauLogSolverToJsonFile)
     {
-        frontend.writeJsonLog = [&](const Luau::ModuleName& moduleName, std::string log) {
+        frontend.writeJsonLog = [&](const Luau::ModuleName& moduleName, std::string log)
+        {
             std::string path = moduleName + ".log.json";
             size_t pos = moduleName.find_last_of('/');
             if (pos != std::string::npos)
@@ -200,11 +204,24 @@ AstStatBlock* Fixture::parse(const std::string& source, const ParseOptions& pars
         // if AST is available, check how lint and typecheck handle error nodes
         if (result.root)
         {
-            if (FFlag::DebugLuauDeferredConstraintResolution)
+            if (FFlag::LuauSolverV2)
             {
                 Mode mode = sourceModule->mode ? *sourceModule->mode : Mode::Strict;
-                ModulePtr module = Luau::check(*sourceModule, mode, {}, builtinTypes, NotNull{&ice}, NotNull{&moduleResolver}, NotNull{&fileResolver},
-                    frontend.globals.globalScope, /*prepareModuleScope*/ nullptr, frontend.options, {}, false, {});
+                ModulePtr module = Luau::check(
+                    *sourceModule,
+                    mode,
+                    {},
+                    builtinTypes,
+                    NotNull{&ice},
+                    NotNull{&moduleResolver},
+                    NotNull{&fileResolver},
+                    frontend.globals.globalScope,
+                    /*prepareModuleScope*/ nullptr,
+                    frontend.options,
+                    {},
+                    false,
+                    {}
+                );
 
                 Luau::lint(sourceModule->root, *sourceModule->names, frontend.globals.globalScope, module.get(), sourceModule->hotcomments, {});
             }
@@ -354,7 +371,7 @@ std::optional<TypeId> Fixture::getType(const std::string& name)
     if (!module->hasModuleScope())
         return std::nullopt;
 
-    if (FFlag::DebugLuauDeferredConstraintResolution)
+    if (FFlag::LuauSolverV2)
         return linearSearchForBinding(module->getModuleScope().get(), name.c_str());
     else
         return lookupName(module->getModuleScope(), name);
