@@ -1939,7 +1939,7 @@ TypeFunctionReductionResult<TypeId> keyofFunctionImpl(
     }
 
     TypeId operandTy = follow(typeParams.at(0));
-
+    dump(operandTy);
     std::shared_ptr<const NormalizedType> normTy = ctx->normalizer->normalize(operandTy);
 
     // if the operand failed to normalize, we can't reduce, but know nothing about inhabitance.
@@ -2040,6 +2040,10 @@ TypeFunctionReductionResult<TypeId> keyofFunctionImpl(
 
     for (std::string key : keys)
         singletons.push_back(ctx->arena->addType(SingletonType{StringSingleton{key}}));
+
+    // If there's only one entry, we don't need a UnionType.
+    if (singletons.size() == 1)
+        return {singletons.front(), false, {}, {}};
 
     return {ctx->arena->addType(UnionType{singletons}), false, {}, {}};
 }
@@ -2334,6 +2338,55 @@ TypeFunctionReductionResult<TypeId> rawgetTypeFunction(
     return indexFunctionImpl(typeParams, packParams, ctx, /* isRaw */ true);
 }
 
+
+TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
+    const std::vector<TypeId>& typeParams,
+    const std::vector<TypePackId>& packParams,
+    NotNull<TypeFunctionContext> ctx,
+    bool isRaw
+)
+{
+    /*if (typeParams.size() != 1 || !packParams.empty())
+    {
+        ctx->ice->ice("tabletype type function: encountered a type function instance without the required argument structure");
+        LUAU_ASSERT(false);
+    }*/
+
+    TypeId stateType = follow(typeParams.at(0));
+
+    //const TypeId stringType = ctx->builtins->stringType;
+
+    TableType newUnsealedTbl = TableType(TableState::Unsealed, TypeLevel{}, ctx->scope.get());
+    newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
+
+    TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
+    
+    /*for (auto& [name, binding] : ctx->scope->bindings)
+    {
+        if (name.local->name == "tbl_C")
+        {
+            
+        }
+    }*/
+
+    return {newTblTy, false, {}, {}};
+    /*return {ctx->arena->addType(
+        TableType({}, TableIndexer{stringType, stringType}, TypeLevel{}, TableState::Unsealed)
+    ), false, {}, {}};*/
+}
+
+// Testing
+TypeFunctionReductionResult<TypeId> tabletypeFunction(
+    TypeId instance,
+    const std::vector<TypeId>& typeParams,
+    const std::vector<TypePackId>& packParams,
+    NotNull<TypeFunctionContext> ctx
+)
+{
+    
+    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false);
+}
+
 BuiltinTypeFunctions::BuiltinTypeFunctions()
     : userFunc{"user", userDefinedTypeFunction}
     , notFunc{"not", notTypeFunction}
@@ -2360,6 +2413,7 @@ BuiltinTypeFunctions::BuiltinTypeFunctions()
     , rawkeyofFunc{"rawkeyof", rawkeyofTypeFunction}
     , indexFunc{"index", indexTypeFunction}
     , rawgetFunc{"rawget", rawgetTypeFunction}
+    , tabletypeFunc{"tabletype", tabletypeFunction}
 {
 }
 
@@ -2406,6 +2460,9 @@ void BuiltinTypeFunctions::addToScope(NotNull<TypeArena> arena, NotNull<Scope> s
 
     scope->exportedTypeBindings[indexFunc.name] = mkBinaryTypeFunction(&indexFunc);
     scope->exportedTypeBindings[rawgetFunc.name] = mkBinaryTypeFunction(&rawgetFunc);
+
+    // Testing
+    scope->exportedTypeBindings[tabletypeFunc.name] = mkUnaryTypeFunction(&tabletypeFunc);
 }
 
 const BuiltinTypeFunctions& builtinTypeFunctions()

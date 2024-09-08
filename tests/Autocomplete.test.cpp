@@ -198,6 +198,72 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauLogSolver, false},
+    };
+
+    CheckResult check1 = check(R"(
+local tbl_A = {} :: typeof({entry1 = 1})
+tbl_A.entry1b = "hi"
+
+type tbl_B = {entry2: nil}
+local tbl_C = nil :: tabletype<"unsealed">
+tbl_C.entry3 = "abc" 
+tbl_C.entry4 = "hi2" 
+
+local test = nil :: typeof(tbl_C)
+local tbl_ABC = nil :: typeof(tbl_A) & tbl_B & typeof(tbl_C)
+
+local indexesABC = nil :: keyof<typeof(tbl_ABC)>
+
+)");
+
+    auto test1 = toString(requireTypeAlias("tbl_B"));
+    auto test2 = toString(requireType("tbl_ABC"));
+    auto test3 = toString(requireType("indexesABC"));
+
+    auto test4 = requireType("indexesABC");
+}
+
+
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "table_type_test1")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauLogSolver, false},
+    };
+
+    CheckResult check1 = check(R"(
+local test = {} :: {idk: string}
+test.idk = "hi"
+
+local tbl_A = {entry1 = 1}
+type tbl_B = {entry2: nil}
+
+local test2 = test :: tabletype<>
+test2.hello = "hi"
+test2.hello2 = "hi"
+
+print(test2.doesntExist)
+
+local test3 = test2 :: typeof(test) & typeof(test2)
+
+type abc = keyof<typeof(test3)>
+
+test3.doesExist@1
+)");
+
+    auto test2 = toString(requireTypeAlias("abc"));
+    auto test1 = toString(requireType("test2"));
+
+    auto ac1 = autocomplete('1');
+    ac1;
+    // CHECK(ac1.entryMap.count("TheIs_doesntActual_Properlty"));
+}
+
 TEST_CASE_FIXTURE(ACFixture, "local_initializer")
 {
     check("local a = @1");
