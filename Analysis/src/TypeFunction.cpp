@@ -2356,16 +2356,19 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
 
     //const TypeId stringType = ctx->builtins->stringType;
 
-    TableType newUnsealedTbl = TableType(TableState::Unsealed, TypeLevel{}, ctx->scope.get());
+    TableType newUnsealedTbl = TableType(TableState::Unsealed, TypeLevel{}, ctx->constraint->scope.get());
     newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
+
+    
 
     TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
     
+
     /*for (auto& [name, binding] : ctx->scope->bindings)
     {
         if (name.local->name == "tbl_C")
         {
-            
+            binding.typeId = newTblTy;
         }
     }*/
 
