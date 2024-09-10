@@ -2343,7 +2343,8 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     const std::vector<TypeId>& typeParams,
     const std::vector<TypePackId>& packParams,
     NotNull<TypeFunctionContext> ctx,
-    bool isRaw
+    bool isRaw,
+    TypeId instance
 )
 {
     /*if (typeParams.size() != 1 || !packParams.empty())
@@ -2356,19 +2357,52 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
 
     //const TypeId stringType = ctx->builtins->stringType;
 
-    TableType newUnsealedTbl = TableType(TableState::Unsealed, TypeLevel{}, ctx->constraint->scope.get());
+    TableType newUnsealedTbl = TableType(TableState::Unsealed, TypeLevel{}, ctx->scope.get());
     newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
 
     
 
     TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
-    
+
 
     /*for (auto& [name, binding] : ctx->scope->bindings)
     {
-        if (name.local->name == "tbl_C")
+        auto ty = follow(binding.typeId);
+
+        // If we are the invoking function
+        if (ty == instance)
         {
             binding.typeId = newTblTy;
+        }
+    }*/
+
+    /*auto& unsolvedConstraints = ctx->solver->unsolvedConstraints;
+    for (auto& [constraint, size] : ctx->solver->blockedConstraints)
+    {
+        if (auto* test = get<AssignPropConstraint>(*constraint))
+        {
+            auto lhsType = follow(test->lhsType);
+
+            if (lhsType == instance)
+            {
+                if (auto bT = get<BlockedType>(test->propType)) {
+                    auto c = bT->getOwner();
+                    unsolvedConstraints.insert(unsolvedConstraints.begin(), NotNull{c});
+                }
+
+                auto cV = AssignPropConstraint{
+                    newTblTy,
+                    test->propName,
+                    test->rhsType,
+                    test->propLocation,
+                    test->propType,
+                    test->decrementPropCount
+                };
+
+                auto newC = NotNull{new Constraint(constraint->scope, constraint->location, cV)};
+
+                unsolvedConstraints.insert(unsolvedConstraints.begin(), newC);
+            }
         }
     }*/
 
@@ -2387,7 +2421,7 @@ TypeFunctionReductionResult<TypeId> tabletypeFunction(
 )
 {
     
-    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false);
+    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false, instance);
 }
 
 BuiltinTypeFunctions::BuiltinTypeFunctions()
