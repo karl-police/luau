@@ -198,6 +198,28 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauLogSolver, false},
+    };
+
+    CheckResult check1 = check(R"(
+local tbl_A = {} :: tabletype<"Free">
+tbl_A.a = 1
+
+print(tbl_A.notValid)
+
+tbl_A.@1
+)");
+
+    auto test1 = toString(requireType("tbl_A"));
+    auto test2 = requireType("tbl_A");
+    
+    auto ac = autocomplete('1');
+}
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
 {
     ScopedFastFlag sff[]{
@@ -210,17 +232,18 @@ local tbl_A = {} :: typeof({entry1 = 1})
 tbl_A.entry1b = "hi"
 
 type tbl_B = {entry2: nil}
-local tbl_C = nil :: tabletype<"unsealed">
+local tbl_C = nil :: tabletype<"Unsealed", {}>
 tbl_C.entry3 = "abc" 
-tbl_C.entry4 = "hi2" 
+tbl_C.entry4 = "hi2"
 
 local test = nil :: typeof(tbl_C)
 local tbl_ABC = nil :: typeof(tbl_A) & tbl_B & typeof(tbl_C)
 
-local indexesABC = nil :: keyof<typeof(tbl_ABC)>
+local indexesABC = nil :: keyof<typeof(tbl_C)>
 )");
 
-    auto test1 = toString(requireTypeAlias("tbl_B"));
+    //auto test1 = toString(requireTypeAlias("tbl_B"));
+    auto test1 = requireType("tbl_C");
     auto test2 = toString(requireType("tbl_ABC"));
     auto test3 = toString(requireType("indexesABC"));
 

@@ -2347,12 +2347,30 @@ TypeFunctionReductionResult<TypeId> rawgetTypeFunction(
 }
 
 
+std::string strToLowercase(std::string& str)
+{
+    std::string result = "";
+
+    for (char c : str)
+        result += tolower(c);
+
+    return result;
+};
+
+std::optional<TableState> resolveTableStateOption(std::string input) {
+    if (input == "unsealed") { return TableState::Unsealed; }
+    if (input == "sealed") { return TableState::Sealed; }
+    if (input == "generic") { return TableState::Generic; }
+    if (input == "free") { return TableState::Free; }
+
+    return std::nullopt;
+};
+
 TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     const std::vector<TypeId>& typeParams,
     const std::vector<TypePackId>& packParams,
     NotNull<TypeFunctionContext> ctx,
-    bool isRaw,
-    TypeId instance
+    bool isRaw
 )
 {
     /*if (typeParams.size() != 1 || !packParams.empty())
@@ -2361,11 +2379,31 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
         LUAU_ASSERT(false);
     }*/
 
-    TypeId stateType = follow(typeParams.at(0));
+    TypeId stateTypeTy = follow(typeParams.at(0));
+
+    std::optional<TableState> tblState = std::nullopt;
+
+    // Get Input Table State
+    if (auto ty = get<SingletonType>(stateTypeTy))
+    {
+        if (auto strSingleton = get<StringSingleton>(ty))
+        {
+            std::string stateInput = strSingleton->value;
+            stateInput = strToLowercase(stateInput);
+            
+            tblState = resolveTableStateOption(stateInput);
+
+            if (tblState == std::nullopt)
+            {
+                ctx->ice->ice("tabletype function: first argument is not a valid table state");
+                LUAU_ASSERT(false);
+            }
+        }
+    }
 
     //const TypeId stringType = ctx->builtins->stringType;
 
-    TableType newUnsealedTbl = TableType(TableState::Unsealed, TypeLevel{}, ctx->scope.get());
+    TableType newUnsealedTbl = TableType(tblState.value(), TypeLevel{}, ctx->scope.get());
     newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
 
     
@@ -2387,7 +2425,7 @@ TypeFunctionReductionResult<TypeId> tabletypeFunction(
 )
 {
     
-    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false, instance);
+    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false);
 }
 
 BuiltinTypeFunctions::BuiltinTypeFunctions()
