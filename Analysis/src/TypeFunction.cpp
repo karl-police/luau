@@ -1939,6 +1939,14 @@ TypeFunctionReductionResult<TypeId> keyofFunctionImpl(
     }
 
     TypeId operandTy = follow(typeParams.at(0));
+
+    // Whether the type is still pending.
+    if (isPending(operandTy, ctx->solver))
+    {
+        operandTy = operandTy;
+        return {std::nullopt, false, {operandTy}, {}};
+    }
+
     dump(operandTy);
     std::shared_ptr<const NormalizedType> normTy = ctx->normalizer->normalize(operandTy);
 
@@ -2363,48 +2371,6 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     
 
     TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
-
-
-    /*for (auto& [name, binding] : ctx->scope->bindings)
-    {
-        auto ty = follow(binding.typeId);
-
-        // If we are the invoking function
-        if (ty == instance)
-        {
-            binding.typeId = newTblTy;
-        }
-    }*/
-
-    /*auto& unsolvedConstraints = ctx->solver->unsolvedConstraints;
-    for (auto& [constraint, size] : ctx->solver->blockedConstraints)
-    {
-        if (auto* test = get<AssignPropConstraint>(*constraint))
-        {
-            auto lhsType = follow(test->lhsType);
-
-            if (lhsType == instance)
-            {
-                if (auto bT = get<BlockedType>(test->propType)) {
-                    auto c = bT->getOwner();
-                    unsolvedConstraints.insert(unsolvedConstraints.begin(), NotNull{c});
-                }
-
-                auto cV = AssignPropConstraint{
-                    newTblTy,
-                    test->propName,
-                    test->rhsType,
-                    test->propLocation,
-                    test->propType,
-                    test->decrementPropCount
-                };
-
-                auto newC = NotNull{new Constraint(constraint->scope, constraint->location, cV)};
-
-                unsolvedConstraints.insert(unsolvedConstraints.begin(), newC);
-            }
-        }
-    }*/
 
     return {newTblTy, false, {}, {}};
     /*return {ctx->arena->addType(
