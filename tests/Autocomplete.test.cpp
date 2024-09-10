@@ -218,7 +218,6 @@ local test = nil :: typeof(tbl_C)
 local tbl_ABC = nil :: typeof(tbl_A) & tbl_B & typeof(tbl_C)
 
 local indexesABC = nil :: keyof<typeof(tbl_ABC)>
-
 )");
 
     auto test1 = toString(requireTypeAlias("tbl_B"));
