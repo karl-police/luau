@@ -15,6 +15,8 @@
 
 LUAU_FASTFLAG(LuauTraceTypesInNonstrictMode2)
 LUAU_FASTFLAG(LuauSetMetatableDoesNotTimeTravel)
+LUAU_FASTFLAG(DebugLuauLogSolver)
+LUAU_FASTFLAG(DebugLuauLogBindings)
 
 using namespace Luau;
 
@@ -202,29 +204,33 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, false},
+        //{FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogBindings, true},
     };
 
     CheckResult check1 = check(R"(
-local tbl_A = {} :: tabletype<"Free">
-tbl_A.a = 1
+local v1: string?
 
-print(tbl_A.notValid)
+local stringButItIsHere = "Windows"
 
-tbl_A.@1
+v1 = if true then stringButItIsHere
+elseif false then "Something"
+else "Other"
 )");
 
-    auto test1 = toString(requireType("tbl_A"));
-    auto test2 = requireType("tbl_A");
-    
-    auto ac = autocomplete('1');
+    //LUAU_REQUIRE_NO_ERRORS(check1);
+
+    auto test1 = requireType("v1");
+
+    auto test2 = toString(check1.errors[1]);
 }
 
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, false},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogBindings, true},
     };
 
     CheckResult check1 = check(R"(
