@@ -230,9 +230,9 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolver, true},
         //{FFlag::DebugLuauLogBindings, true},
-        {FFlag::DebugLuauLogSolverToJson, true},
+        //{FFlag::DebugLuauLogSolverToJson, true},
     };
 
     CheckResult check1 = check(R"(
