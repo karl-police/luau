@@ -2397,6 +2397,8 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
             {
                 ctx->ice->ice("tabletype function: first argument is not a valid table state");
                 LUAU_ASSERT(false);
+
+                return {std::nullopt, true, {}, {}};
             }
         }
     }
