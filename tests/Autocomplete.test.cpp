@@ -17,6 +17,7 @@ LUAU_FASTFLAG(LuauTraceTypesInNonstrictMode2)
 LUAU_FASTFLAG(LuauSetMetatableDoesNotTimeTravel)
 LUAU_FASTFLAG(DebugLuauLogSolver)
 LUAU_FASTFLAG(DebugLuauLogBindings)
+LUAU_FASTFLAG(DebugLuauLogSolverToJson)
 
 using namespace Luau;
 
@@ -205,7 +206,8 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
         //{FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverToJson, true}
     };
 
     CheckResult check1 = check(R"(
@@ -221,8 +223,7 @@ else "Other"
     //LUAU_REQUIRE_NO_ERRORS(check1);
 
     auto test1 = requireType("v1");
-
-    auto test2 = toString(check1.errors[1]);
+    //auto test2 = toString(check1.errors[1]);
 }
 
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
@@ -231,6 +232,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
         {FFlag::LuauSolverV2, true},
         //{FFlag::DebugLuauLogSolver, true},
         //{FFlag::DebugLuauLogBindings, true},
+        {FFlag::DebugLuauLogSolverToJson, true},
     };
 
     CheckResult check1 = check(R"(
