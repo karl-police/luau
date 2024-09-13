@@ -122,23 +122,27 @@ static bool matchAssert(const AstExprCall& call)
     return true;
 }
 
-template <typename T,
-typename std::enable_if<
-    std::is_same<T, ConstraintV>::value ||
-    std::is_same<T, ConstraintPtr*>::value
-, int>::type = 0
->
-[[maybe_unused]] static void LogGeneratorAddConstraint(const ScopePtr& scope, T c_In)
-{
-    if constexpr (std::is_same_v<T, ConstraintV>)
-    {
-        ConstraintV constraintV = c_In;
 
-        printf("It is a ConstraintV!\n");
+[[maybe_unused]] static void LogGeneratorAddConstraint(const ScopePtr& scope, Variant<ConstraintV, ConstraintPtr> c_In)
+{
+    ConstraintV *p_constraintV = nullptr;
+
+    if (auto cV = get_if<ConstraintV>(&c_In))
+    {
+        p_constraintV = cV;
     }
-    else if (std::is_same_v<T, ConstraintPtr*>) {
-        ConstraintPtr* cPtr = c_In;
+    else if (auto cPtr = get_if<ConstraintPtr>(&c_In))
+    {
+        p_constraintV = &cPtr->get()->c;
     }
+    else {
+        // Missing a type.
+        LUAU_ASSERT(false);
+    }
+
+    ConstraintV constraintV = *p_constraintV;
+
+
 }
 
 
@@ -399,7 +403,7 @@ NotNull<Constraint> ConstraintGenerator::addConstraint(const ScopePtr& scope, st
 {
     if (FFlag::DebugLuauLogSolverGenerator)
     {
-        LogGeneratorAddConstraint(scope, &c);
+        LogGeneratorAddConstraint(scope, c);
     }
 
     return NotNull{constraints.emplace_back(std::move(c)).get()};
