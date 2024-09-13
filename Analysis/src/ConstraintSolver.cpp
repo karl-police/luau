@@ -1459,30 +1459,8 @@ bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<con
     // This is probably the only thing that makes this not insane to do.
     if (auto refCount = unresolvedConstraints.find(c.freeType); refCount && *refCount > 1)
     {
-        // canMutate here is used to check if the freeType is owned by the same constraint
-        if (canMutate(c.freeType, constraint) == false)
-        {
-            // if it isn't owned by the same constraint, then we can block it
-            block(c.freeType, constraint);
-            return false;
-        }
-        else
-        {
-            // Is this needed? Or is there an issue with the ConstraintGenerator
-            for (auto uC : unsolvedConstraints)
-            {
-                auto unsolvedConstraint = uC.get();
-                
-                if (auto subTyConstraint = unsolvedConstraint->c.get_if<SubtypeConstraint>())
-                {
-                    if (subTyConstraint->subType == c.freeType)
-                    {
-                        // If we depend on a SubtypeConstraint.
-                        return false;
-                    }
-                }
-            }
-        }
+        block(c.freeType, constraint);
+        return false;
     }
 
     auto test = unresolvedConstraints.find(c.primitiveType);
