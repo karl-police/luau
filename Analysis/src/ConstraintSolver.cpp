@@ -1460,7 +1460,7 @@ bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<con
     if (auto refCount = unresolvedConstraints.find(c.freeType); refCount && *refCount > 1)
     {
         // canMutate here is used to check if the freeType is owned by the same constraint
-        /*if (canMutate(c.freeType, constraint) == false)
+        if (canMutate(c.freeType, constraint) == false)
         {
             // if it isn't owned by the same constraint, then we can block it
             block(c.freeType, constraint);
@@ -1478,15 +1478,11 @@ bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<con
                     if (subTyConstraint->subType == c.freeType)
                     {
                         // If we depend on a SubtypeConstraint.
-                        block(c.freeType, constraint);
                         return false;
                     }
                 }
             }
-        }*/
-
-        block(c.freeType, constraint);
-        return false;
+        }
     }
 
     auto test = unresolvedConstraints.find(c.primitiveType);

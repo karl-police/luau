@@ -1946,7 +1946,6 @@ TypeFunctionReductionResult<TypeId> keyofFunctionImpl(
         return {std::nullopt, false, {operandTy}, {}};
     }*/
 
-    dump(operandTy);
     std::shared_ptr<const NormalizedType> normTy = ctx->normalizer->normalize(operandTy);
 
     // if the operand failed to normalize, we can't reduce, but know nothing about inhabitance.
