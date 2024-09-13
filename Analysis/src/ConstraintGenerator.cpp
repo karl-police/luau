@@ -29,6 +29,7 @@
 LUAU_FASTINT(LuauCheckRecursionLimit);
 LUAU_FASTFLAG(DebugLuauLogSolverToJson);
 LUAU_FASTFLAG(DebugLuauMagicTypes);
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverGenerator, false); // CUSTOM-2
 
 namespace Luau
 {
@@ -236,6 +237,12 @@ void ConstraintGenerator::visitModuleRoot(AstStatBlock* block)
     prepopulateGlobalScope(scope, block);
 
     Checkpoint start = checkpoint(this);
+
+    // CUSTOM-2
+    if (FFlag::DebugLuauLogSolverGenerator)
+    {
+        printf("Starting ConstraintGenerator - visitModuleRoot\n\n");
+    }
 
     ControlFlow cf = visitBlockWithoutChildScope(scope, block);
     if (cf == ControlFlow::None)
@@ -756,6 +763,7 @@ ControlFlow ConstraintGenerator::visitBlockWithoutChildScope(const ScopePtr& sco
     return firstControlFlow.value_or(ControlFlow::None);
 }
 
+// The next vital function to begin the ConstraintGenerator.
 ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
 {
     RecursionLimiter limiter{&recursionCount, FInt::LuauCheckRecursionLimit};

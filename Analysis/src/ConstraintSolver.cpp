@@ -28,6 +28,7 @@
 #include <utility>
 
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolver, false);
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverMoreDetails, false); // CUSTOM-1
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverIncludeDependencies, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogBindings, false);
 LUAU_FASTINTVARIABLE(LuauSolverRecursionLimit, 500);
@@ -61,6 +62,28 @@ size_t HashBlockedConstraintId::operator()(const BlockedConstraintId& bci) const
 
     for (NotNull<Scope> child : scope->children)
         dumpBindings(child, opts);
+}
+
+// Log Function for block()
+[[maybe_unused]] static void LogSolverBlockAction(BlockedConstraintId bci, NotNull<const Constraint> constraint)
+{
+    printf("\033[38;2;160;0;0m!! Block Pushed !!\033[0m\n\t");
+
+    if (auto ty = get_if<TypeId>(&bci)) 
+    {
+        auto dump = toString(*ty);
+    }
+    else if (auto tyPackId = (get_if<TypePackId>(&bci))) 
+    {
+        
+    }
+    else if (auto blockedConstraint = get_if<const Constraint*>(&bci))
+    {
+    
+    }
+    else
+        LUAU_ASSERT(!"Should be unreachable");
+    
 }
 
 // used only in asserts
@@ -424,6 +447,20 @@ void ConstraintSolver::run()
             if (logger)
             {
                 snapshot = logger->prepareStepSnapshot(rootScope, c, force, unsolvedConstraints);
+            }
+
+            
+            // More Debugging Info
+            if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
+            {
+                printf(
+                    "\n" "\033[0;38;2;255;255;0m\033[48;2;20;20;20m" "tryDispatch:%s" "\033[K\033[39m" "\n"
+                    "\t%s" "\033[0m" "\n\n",
+
+                    (force ? " \033[7;38;2;50;50;0m!! Forced\033[27m" : ""),
+                    toString(*c).c_str()
+                );
+                // CUSTOM-1
             }
 
             bool success = tryDispatch(c, force);
@@ -1422,9 +1459,38 @@ bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<con
     // This is probably the only thing that makes this not insane to do.
     if (auto refCount = unresolvedConstraints.find(c.freeType); refCount && *refCount > 1)
     {
+        // canMutate here is used to check if the freeType is owned by the same constraint
+        /*if (canMutate(c.freeType, constraint) == false)
+        {
+            // if it isn't owned by the same constraint, then we can block it
+            block(c.freeType, constraint);
+            return false;
+        }
+        else
+        {
+            // Is this needed? Or is there an issue with the ConstraintGenerator
+            for (auto uC : unsolvedConstraints)
+            {
+                auto unsolvedConstraint = uC.get();
+                
+                if (auto subTyConstraint = unsolvedConstraint->c.get_if<SubtypeConstraint>())
+                {
+                    if (subTyConstraint->subType == c.freeType)
+                    {
+                        // If we depend on a SubtypeConstraint.
+                        block(c.freeType, constraint);
+                        return false;
+                    }
+                }
+            }
+        }*/
+
         block(c.freeType, constraint);
         return false;
     }
+
+    auto test = unresolvedConstraints.find(c.primitiveType);
+    test = test;
 
     TypeId bindTo = c.primitiveType;
 
@@ -2637,8 +2703,14 @@ void ConstraintSolver::block(NotNull<const Constraint> target, NotNull<const Con
         if (logger)
             logger->pushBlock(constraint, target);
 
-        if (FFlag::DebugLuauLogSolver)
+        if (FFlag::DebugLuauLogSolver) {
+            if (FFlag::DebugLuauLogSolverMoreDetails)
+            {
+                LogSolverBlockAction(target.get(), constraint);
+            }
+
             printf("%s depends on constraint %s\n", toString(*constraint, opts).c_str(), toString(*target, opts).c_str());
+        }
     }
 }
 
@@ -2650,8 +2722,14 @@ bool ConstraintSolver::block(TypeId target, NotNull<const Constraint> constraint
         if (logger)
             logger->pushBlock(constraint, target);
 
-        if (FFlag::DebugLuauLogSolver)
+        if (FFlag::DebugLuauLogSolver) {
+            if (FFlag::DebugLuauLogSolverMoreDetails)
+            {
+                LogSolverBlockAction(target, constraint);
+            }
+
             printf("%s depends on TypeId %s\n", toString(*constraint, opts).c_str(), toString(target, opts).c_str());
+        }
     }
 
     return false;
@@ -2666,7 +2744,14 @@ bool ConstraintSolver::block(TypePackId target, NotNull<const Constraint> constr
             logger->pushBlock(constraint, target);
 
         if (FFlag::DebugLuauLogSolver)
+        {
+            if (FFlag::DebugLuauLogSolverMoreDetails)
+            {
+                LogSolverBlockAction(target, constraint);
+            }
+
             printf("%s depends on TypePackId %s\n", toString(*constraint, opts).c_str(), toString(target, opts).c_str());
+        }
     }
 
     return false;

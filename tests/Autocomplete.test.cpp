@@ -18,6 +18,8 @@ LUAU_FASTFLAG(LuauSetMetatableDoesNotTimeTravel)
 LUAU_FASTFLAG(DebugLuauLogSolver)
 LUAU_FASTFLAG(DebugLuauLogBindings)
 LUAU_FASTFLAG(DebugLuauLogSolverToJson)
+LUAU_FASTFLAG(DebugLuauLogSolverMoreDetails)
+LUAU_FASTFLAG(DebugLuauLogSolverGenerator)
 
 using namespace Luau;
 
@@ -201,11 +203,86 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "test2")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverToJson, true}
+    };
+
+    CheckResult check1 = check(R"(
+type Test1 = string
+
+type Test2 = number
+type Test3 = number
+
+local v1 = nil
+v1 = v1 :: Test2
+
+local v2: Test3
+
+local foo = {
+A = "a",
+B = "b",
+C = "c",
+}
+
+type Foo = keyof<typeof(foo)>
+
+local a: {Foo} = {
+  "A"
+}
+)");
+
+    // LUAU_REQUIRE_NO_ERRORS(check1);
+
+    auto Foo = requireTypeAlias("Foo");
+    auto test1 = toString(check1.errors[0]);
+}
+
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "test1")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverToJson, true}
+    };
+
+    CheckResult check1 = check(R"(
+--!strict
+
+local foo = {
+A = "a",
+B = "b",
+C = "c",
+}
+
+type Foo = keyof<typeof(foo)>
+
+local a: {Foo} = {
+  "A"
+}
+)");
+
+    // LUAU_REQUIRE_NO_ERRORS(check1);
+
+    auto Foo = requireTypeAlias("Foo");
+    auto test1 = toString(check1.errors[0]);
+}
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
     };
@@ -231,6 +308,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
         {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
@@ -3389,6 +3467,15 @@ TEST_CASE_FIXTURE(ACFixture, "string_singleton_in_if_statement")
 // https://github.com/Roblox/luau/issues/858
 TEST_CASE_FIXTURE(ACFixture, "string_singleton_in_if_statement2")
 {
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverToJson, true}
+    };
+
     // don't run this when the DCR flag isn't set
     if (!FFlag::LuauSolverV2)
         return;

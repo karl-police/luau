@@ -1941,11 +1941,10 @@ TypeFunctionReductionResult<TypeId> keyofFunctionImpl(
     TypeId operandTy = follow(typeParams.at(0));
 
     // Whether the type is still pending.
-    if (isPending(operandTy, ctx->solver))
+    /*if (isPending(operandTy, ctx->solver))
     {
-        operandTy = operandTy;
         return {std::nullopt, false, {operandTy}, {}};
-    }
+    }*/
 
     dump(operandTy);
     std::shared_ptr<const NormalizedType> normTy = ctx->normalizer->normalize(operandTy);
@@ -2212,6 +2211,13 @@ TypeFunctionReductionResult<TypeId> indexFunctionImpl(
         return {std::nullopt, true, {}, {}};
 
     TypeId indexerTy = follow(typeParams.at(1));
+
+    // Whether the type is still pending.
+    if (isPending(indexerTy, ctx->solver))
+    {
+        return {std::nullopt, false, {indexerTy}, {}};
+    }
+
     std::shared_ptr<const NormalizedType> indexerNormTy = ctx->normalizer->normalize(indexerTy);
 
     // if the indexer failed to normalize, we can't reduce, but know nothing about inhabitance.
@@ -2370,7 +2376,8 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     const std::vector<TypeId>& typeParams,
     const std::vector<TypePackId>& packParams,
     NotNull<TypeFunctionContext> ctx,
-    bool isRaw
+    bool isRaw,
+    TypeId instance
 )
 {
     /*if (typeParams.size() != 1 || !packParams.empty())
@@ -2408,9 +2415,25 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     TableType newUnsealedTbl = TableType(tblState.value(), TypeLevel{}, ctx->scope.get());
     newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
 
-    
 
-    TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
+    //TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
+
+
+    BlockedType testBlocked = BlockedType{};
+
+
+
+    TypeId newTblTy = ctx->arena->addType(testBlocked);
+
+    for (auto& c : ctx->solver->unsolvedConstraints)
+    {
+        
+    }
+
+    if (auto refCount = ctx->solver->unresolvedConstraints.find(instance))
+    {
+        printf("HELP: %s", refCount);
+    }
 
     return {newTblTy, false, {}, {}};
     /*return {ctx->arena->addType(
@@ -2427,7 +2450,7 @@ TypeFunctionReductionResult<TypeId> tabletypeFunction(
 )
 {
     
-    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false);
+    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false, instance);
 }
 
 BuiltinTypeFunctions::BuiltinTypeFunctions()
