@@ -2048,7 +2048,8 @@ TypeFunctionReductionResult<TypeId> keyofFunctionImpl(
     for (std::string key : keys)
         singletons.push_back(ctx->arena->addType(SingletonType{StringSingleton{key}}));
 
-    // If there's only one entry, we don't need a UnionType.
+    // We can take straight take it from the first entry
+    // because it was added into the type arena already.
     if (singletons.size() == 1)
         return {singletons.front(), false, {}, {}};
 
@@ -2212,7 +2213,6 @@ TypeFunctionReductionResult<TypeId> indexFunctionImpl(
 
     TypeId indexerTy = follow(typeParams.at(1));
 
-    // Whether the type is still pending.
     if (isPending(indexerTy, ctx->solver))
     {
         return {std::nullopt, false, {indexerTy}, {}};
