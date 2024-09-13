@@ -122,6 +122,26 @@ static bool matchAssert(const AstExprCall& call)
     return true;
 }
 
+template <typename T,
+typename std::enable_if<
+    std::is_same<T, ConstraintV>::value ||
+    std::is_same<T, ConstraintPtr*>::value
+, int>::type = 0
+>
+[[maybe_unused]] static void LogGeneratorAddConstraint(const ScopePtr& scope, T c_In)
+{
+    if constexpr (std::is_same_v<T, ConstraintV>)
+    {
+        ConstraintV constraintV = c_In;
+
+        printf("It is a ConstraintV!\n");
+    }
+    else if (std::is_same_v<T, ConstraintPtr*>) {
+        ConstraintPtr* cPtr = c_In;
+    }
+}
+
+
 namespace
 {
 
@@ -367,11 +387,21 @@ std::optional<TypeId> ConstraintGenerator::lookup(const ScopePtr& scope, Locatio
 
 NotNull<Constraint> ConstraintGenerator::addConstraint(const ScopePtr& scope, const Location& location, ConstraintV cv)
 {
+    if (FFlag::DebugLuauLogSolverGenerator)
+    {
+        LogGeneratorAddConstraint(scope, cv);
+    }
+
     return NotNull{constraints.emplace_back(new Constraint{NotNull{scope.get()}, location, std::move(cv)}).get()};
 }
 
 NotNull<Constraint> ConstraintGenerator::addConstraint(const ScopePtr& scope, std::unique_ptr<Constraint> c)
 {
+    if (FFlag::DebugLuauLogSolverGenerator)
+    {
+        LogGeneratorAddConstraint(scope, &c);
+    }
+
     return NotNull{constraints.emplace_back(std::move(c)).get()};
 }
 
@@ -766,6 +796,11 @@ ControlFlow ConstraintGenerator::visitBlockWithoutChildScope(const ScopePtr& sco
 // The next vital function to begin the ConstraintGenerator.
 ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
 {
+    if (FFlag::DebugLuauLogSolverGenerator)
+    {
+        
+    }
+
     RecursionLimiter limiter{&recursionCount, FInt::LuauCheckRecursionLimit};
 
     if (auto s = stat->as<AstStatBlock>())
