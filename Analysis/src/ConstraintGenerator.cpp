@@ -128,12 +128,15 @@ static bool matchAssert(const AstExprCall& call)
 {
     printf("Constraint Added:\n\t%s\n\n", toString(cV).c_str());
 }*/
-
 [[maybe_unused]] static void LogGeneratorAddConstraint(const ScopePtr& scope, const Constraint& constraint)
 {
-    printf("Constraint Added:\n\t%s\n\n", toString(constraint).c_str());
-}
+    printf("Constraint Add:\n\t%s\n\n", toString(constraint).c_str());
+} // CUSTOM-2
 
+class AstDumpVisitor : AstVisitor {
+public:
+    AstDumpVisitor() {};
+};
 
 namespace
 {
@@ -795,7 +798,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
     if (FFlag::DebugLuauLogSolverGenerator)
     {
         
-    }
+    } // CUSTOM-2
 
     RecursionLimiter limiter{&recursionCount, FInt::LuauCheckRecursionLimit};
 

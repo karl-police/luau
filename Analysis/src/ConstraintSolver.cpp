@@ -67,24 +67,31 @@ size_t HashBlockedConstraintId::operator()(const BlockedConstraintId& bci) const
 // Log Function for block()
 [[maybe_unused]] static void LogSolverBlockAction(BlockedConstraintId bci, NotNull<const Constraint> constraint)
 {
-    printf("\033[38;2;160;0;0m!! Block Pushed !!\033[0m\n\t");
+    // The depends on at the right is the "target".
+
+    printf("\033[38;2;160;0;0m!! Block Pushed !!\033[0m\t\n");
 
     if (auto ty = get_if<TypeId>(&bci)) 
     {
-        auto dump = toString(*ty);
+
     }
     else if (auto tyPackId = (get_if<TypePackId>(&bci))) 
     {
-        
+
     }
-    else if (auto blockedConstraint = get_if<const Constraint*>(&bci))
+    else if (auto blockedConstraint = *(get_if<const Constraint*>(&bci)))
     {
-    
+
     }
     else
         LUAU_ASSERT(!"Should be unreachable");
+}
+
+[[maybe_unused]] static void LogSolverUnblockAction(BlockedConstraintId bci, NotNull<const Constraint> constraint)
+{
     
 }
+
 
 // used only in asserts
 [[maybe_unused]] static bool canMutate(TypeId ty, NotNull<const Constraint> constraint)
@@ -2796,7 +2803,9 @@ void ConstraintSolver::unblock_(BlockedConstraintId progressed)
     {
         auto& count = blockedConstraints[NotNull{unblockedConstraint}];
         if (FFlag::DebugLuauLogSolver)
+        {
             printf("Unblocking count=%d\t%s\n", int(count), toString(*unblockedConstraint, opts).c_str());
+        }
 
         // This assertion being hit indicates that `blocked` and
         // `blockedConstraints` desynchronized at some point. This is problematic
@@ -2909,7 +2918,7 @@ NotNull<Constraint> ConstraintSolver::pushConstraint(NotNull<Scope> scope, const
     if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
     {
         printf("Constraint Pushed!\n\t%s", toString(*c).c_str());
-    }
+    } // CUSTOM-1
 
     solverConstraints.push_back(std::move(c));
     unsolvedConstraints.push_back(borrow);
