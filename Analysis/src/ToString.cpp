@@ -1757,7 +1757,7 @@ std::string toStringVector(const std::vector<TypeId>& types, ToStringOptions& op
     return s;
 }
 
-std::string toString(const ConstraintV& cV, ToStringOptions& opts)
+/*std::string toString(const ConstraintV& cV, ToStringOptions& opts)
 {
     auto go = [&opts](auto&& c) -> std::string
     {
@@ -1854,9 +1854,9 @@ std::string toString(const ConstraintV& cV)
 
 std::string toString(const Constraint& constraint, ToStringOptions& opts) {
     return toString(constraint.c, opts);
-}
+}*/
 
-/*std::string toString(const Constraint& constraint, ToStringOptions& opts)
+std::string toString(const Constraint& constraint, ToStringOptions& opts)
 {
     auto go = [&opts](auto&& c) -> std::string
     {
@@ -1944,7 +1944,7 @@ std::string toString(const Constraint& constraint, ToStringOptions& opts) {
     };
 
     return visit(go, constraint.c);
-}*/
+}
 
 std::string toString(const Constraint& constraint)
 {
