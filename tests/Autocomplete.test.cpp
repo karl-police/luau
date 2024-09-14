@@ -281,8 +281,9 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, true},
-        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
     };

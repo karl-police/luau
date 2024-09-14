@@ -2905,6 +2905,12 @@ NotNull<Constraint> ConstraintSolver::pushConstraint(NotNull<Scope> scope, const
 {
     std::unique_ptr<Constraint> c = std::make_unique<Constraint>(scope, location, std::move(cv));
     NotNull<Constraint> borrow = NotNull(c.get());
+
+    if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
+    {
+        printf("Constraint Pushed!\n\t%s", toString(*c).c_str());
+    }
+
     solverConstraints.push_back(std::move(c));
     unsolvedConstraints.push_back(borrow);
 

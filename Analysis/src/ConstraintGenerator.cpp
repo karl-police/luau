@@ -123,26 +123,15 @@ static bool matchAssert(const AstExprCall& call)
 }
 
 
-[[maybe_unused]] static void LogGeneratorAddConstraint(const ScopePtr& scope, Variant<ConstraintV, ConstraintPtr> c_In)
+// For Debugging
+/*[[maybe_unused]] static void LogGeneratorAddConstraintV(const ScopePtr& scope, const ConstraintV& cV)
 {
-    ConstraintV *p_constraintV = nullptr;
+    printf("Constraint Added:\n\t%s\n\n", toString(cV).c_str());
+}*/
 
-    if (auto cV = get_if<ConstraintV>(&c_In))
-    {
-        p_constraintV = cV;
-    }
-    else if (auto cPtr = get_if<ConstraintPtr>(&c_In))
-    {
-        p_constraintV = &cPtr->get()->c;
-    }
-    else {
-        // Missing a type.
-        LUAU_ASSERT(false);
-    }
-
-    ConstraintV constraintV = *p_constraintV;
-
-
+[[maybe_unused]] static void LogGeneratorAddConstraint(const ScopePtr& scope, const Constraint& constraint)
+{
+    printf("Constraint Added:\n\t%s\n\n", toString(constraint).c_str());
 }
 
 
@@ -391,19 +380,22 @@ std::optional<TypeId> ConstraintGenerator::lookup(const ScopePtr& scope, Locatio
 
 NotNull<Constraint> ConstraintGenerator::addConstraint(const ScopePtr& scope, const Location& location, ConstraintV cv)
 {
+    auto* c = new Constraint{NotNull{scope.get()}, location, std::move(cv)};
+
     if (FFlag::DebugLuauLogSolverGenerator)
     {
-        LogGeneratorAddConstraint(scope, cv);
+        LogGeneratorAddConstraint(scope, *c);
     }
 
-    return NotNull{constraints.emplace_back(new Constraint{NotNull{scope.get()}, location, std::move(cv)}).get()};
+    //return NotNull{constraints.emplace_back(new Constraint{NotNull{scope.get()}, location, std::move(cv)}).get()};
+    return NotNull{constraints.emplace_back(c).get()};
 }
 
 NotNull<Constraint> ConstraintGenerator::addConstraint(const ScopePtr& scope, std::unique_ptr<Constraint> c)
 {
     if (FFlag::DebugLuauLogSolverGenerator)
     {
-        LogGeneratorAddConstraint(scope, c);
+        LogGeneratorAddConstraint(scope, *c);
     }
 
     return NotNull{constraints.emplace_back(std::move(c)).get()};
