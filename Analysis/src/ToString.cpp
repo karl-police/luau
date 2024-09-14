@@ -1757,7 +1757,106 @@ std::string toStringVector(const std::vector<TypeId>& types, ToStringOptions& op
     return s;
 }
 
-std::string toString(const Constraint& constraint, ToStringOptions& opts)
+std::string toString(const ConstraintV& cV, ToStringOptions& opts)
+{
+    auto go = [&opts](auto&& c) -> std::string
+    {
+        using T = std::decay_t<decltype(c)>;
+
+        auto tos = [&opts](auto&& a)
+        {
+            return toString(a, opts);
+        };
+
+        if constexpr (std::is_same_v<T, SubtypeConstraint>)
+        {
+            std::string subStr = tos(c.subType);
+            std::string superStr = tos(c.superType);
+            return subStr + " <: " + superStr;
+        }
+        else if constexpr (std::is_same_v<T, PackSubtypeConstraint>)
+        {
+            std::string subStr = tos(c.subPack);
+            std::string superStr = tos(c.superPack);
+            return subStr + " <...: " + superStr;
+        }
+        else if constexpr (std::is_same_v<T, GeneralizationConstraint>)
+        {
+            std::string subStr = tos(c.generalizedType);
+            std::string superStr = tos(c.sourceType);
+            return subStr + " ~ gen " + superStr;
+        }
+        else if constexpr (std::is_same_v<T, IterableConstraint>)
+        {
+            std::string iteratorStr = tos(c.iterator);
+            std::string variableStr = toStringVector(c.variables, opts);
+
+            return variableStr + " ~ iterate " + iteratorStr;
+        }
+        else if constexpr (std::is_same_v<T, NameConstraint>)
+        {
+            std::string namedStr = tos(c.namedType);
+            return "@name(" + namedStr + ") = " + c.name;
+        }
+        else if constexpr (std::is_same_v<T, TypeAliasExpansionConstraint>)
+        {
+            std::string targetStr = tos(c.target);
+            return "expand " + targetStr;
+        }
+        else if constexpr (std::is_same_v<T, FunctionCallConstraint>)
+        {
+            return "call " + tos(c.fn) + "( " + tos(c.argsPack) + " )" + " with { result = " + tos(c.result) + " }";
+        }
+        else if constexpr (std::is_same_v<T, FunctionCheckConstraint>)
+        {
+            return "function_check " + tos(c.fn) + " " + tos(c.argsPack);
+        }
+        else if constexpr (std::is_same_v<T, PrimitiveTypeConstraint>)
+        {
+            if (c.expectedType)
+                return "prim " + tos(c.freeType) + "[expected: " + tos(*c.expectedType) + "] as " + tos(c.primitiveType);
+            else
+                return "prim " + tos(c.freeType) + " as " + tos(c.primitiveType);
+        }
+        else if constexpr (std::is_same_v<T, HasPropConstraint>)
+        {
+            return tos(c.resultType) + " ~ hasProp " + tos(c.subjectType) + ", \"" + c.prop + "\" ctx=" + std::to_string(int(c.context));
+        }
+        else if constexpr (std::is_same_v<T, HasIndexerConstraint>)
+        {
+            return tos(c.resultType) + " ~ hasIndexer " + tos(c.subjectType) + " " + tos(c.indexType);
+        }
+        else if constexpr (std::is_same_v<T, AssignPropConstraint>)
+            return "assignProp " + tos(c.lhsType) + " " + c.propName + " " + tos(c.rhsType);
+        else if constexpr (std::is_same_v<T, AssignIndexConstraint>)
+            return "assignIndex " + tos(c.lhsType) + " " + tos(c.indexType) + " " + tos(c.rhsType);
+        else if constexpr (std::is_same_v<T, UnpackConstraint>)
+            return toStringVector(c.resultPack, opts) + " ~ ...unpack " + tos(c.sourcePack);
+        else if constexpr (std::is_same_v<T, ReduceConstraint>)
+            return "reduce " + tos(c.ty);
+        else if constexpr (std::is_same_v<T, ReducePackConstraint>)
+        {
+            return "reduce " + tos(c.tp);
+        }
+        else if constexpr (std::is_same_v<T, EqualityConstraint>)
+            return "equality: " + tos(c.resultType) + " ~ " + tos(c.assignmentType);
+        else
+            static_assert(always_false_v<T>, "Non-exhaustive constraint switch");
+    };
+
+    return visit(go, cV);
+}
+
+std::string toString(const ConstraintV& cV)
+{
+    return toString(cV, ToStringOptions{});
+}
+
+std::string toString(const Constraint& constraint, ToStringOptions& opts) {
+    return toString(constraint.c, opts);
+}
+
+/*std::string toString(const Constraint& constraint, ToStringOptions& opts)
 {
     auto go = [&opts](auto&& c) -> std::string
     {
@@ -1845,7 +1944,7 @@ std::string toString(const Constraint& constraint, ToStringOptions& opts)
     };
 
     return visit(go, constraint.c);
-}
+}*/
 
 std::string toString(const Constraint& constraint)
 {
