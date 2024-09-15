@@ -295,7 +295,12 @@ public:
      * @param cv the body of the constraint.
      **/
     NotNull<Constraint> pushConstraint(NotNull<Scope> scope, const Location& location, ConstraintV cv);
-    NotNull<Constraint> pushConstraintAfter(NotNull<Scope> scope, const Location& location, ConstraintV cv, const Constraint& constraint);
+
+    /** Push a Constraint right at the position after a specific constraint.
+     * @param cv the body of the constraint.
+     * @param afterConstraint The constraint to find in unsolvedConstraints to insert the new constraint after at.
+     **/
+    NotNull<Constraint> pushConstraintAfter(NotNull<Scope> scope, const Location& location, ConstraintV cv, const Constraint& afterConstraint);
 
     /**
      * Attempts to resolve a module from its module information. Returns the

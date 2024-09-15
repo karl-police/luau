@@ -2951,7 +2951,6 @@ NotNull<Constraint> ConstraintSolver::pushConstraint(NotNull<Scope> scope, const
     return borrow;
 }
 
-// Push a Constraint right at the position after a specific constraint.
 NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
     NotNull<Scope> scope,
     const Location& location,
