@@ -336,7 +336,7 @@ struct InstantiationQueuer : TypeOnceVisitor
     bool visit(TypeId ty, const TypeFunctionInstanceType&) override
     {
         solver->pushConstraintAfter(scope, location, ReduceConstraint{ty}, *solver->currentConstraintRef, true);
-        //solver->pushConstraint(scope, location, ReduceConstraint{ty});
+        //solver->pushConstraint(scope, location, ReduceConstraint{ty}); // CUSTOM-4
         return true;
     }
 
