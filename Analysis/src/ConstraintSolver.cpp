@@ -439,14 +439,13 @@ void ConstraintSolver::run()
             NotNull<const Constraint> c = unsolvedConstraints[i];
             if (!force && isBlocked(c))
             {
-                // CUSTOM-1
                 if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
                 {
                     printf(
-                        "\033[38;2;50;50;50m" "Skipped %s" "\033[0m" "\n",
+                        "\033[38;2;50;50;50m" "Skipped\t%s" "\033[0m" "\n",
                         toString(*c).c_str()
                     );
-                }
+                } // CUSTOM-1
 
                 ++i;
                 continue;
@@ -474,7 +473,7 @@ void ConstraintSolver::run()
                     "\t%s" "\033[0m" "\n\n",
 
                     (force ? " \033[7;38;2;50;50;0m!! Forced\033[27m" : ""),
-                    toString(*c).c_str()
+                    toString(*c, opts).c_str()
                 );
                 // CUSTOM-1
             }
@@ -683,7 +682,7 @@ bool ConstraintSolver::tryDispatch(NotNull<const Constraint> constraint, bool fo
     else if (auto fcc = get<FunctionCheckConstraint>(*constraint))
         success = tryDispatch(*fcc, constraint);
     else if (auto fcc = get<PrimitiveTypeConstraint>(*constraint))
-        success = tryDispatch(*fcc, constraint);
+        success = tryDispatch(*fcc, constraint, force);
     else if (auto hpc = get<HasPropConstraint>(*constraint))
         success = tryDispatch(*hpc, constraint);
     else if (auto spc = get<HasIndexerConstraint>(*constraint))
@@ -979,7 +978,10 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
     // Adding ReduceConstraint on type function for the constraint solver
     if (auto typeFn = get<TypeFunctionInstanceType>(follow(tf->type)))
-        pushConstraint(NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type});
+        pushConstraintAfter(
+            NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type}, *constraint.get()
+        );
+        //pushConstraint(NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type});
 
     // If there are no parameters to the type function we can just use the type
     // directly.
@@ -1459,7 +1461,7 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
     return true;
 }
 
-bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint)
+bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint, bool force)
 {
     std::optional<TypeId> expectedType = c.expectedType ? std::make_optional<TypeId>(follow(*c.expectedType)) : std::nullopt;
     if (expectedType && (isBlocked(*expectedType) || get<PendingExpansionType>(*expectedType)))
@@ -1475,12 +1477,22 @@ bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<con
     // This is probably the only thing that makes this not insane to do.
     if (auto refCount = unresolvedConstraints.find(c.freeType); refCount && *refCount > 1)
     {
-        block(c.freeType, constraint);
-        return false;
+        /*if (force)
+        {
+            // If we get force dispatched and are the owner of the constraint
+            // Then do not block.
+            if (canMutate(c.freeType, constraint) == false)
+            {
+                block(c.freeType, constraint);
+                return false;
+            }
+        }
+        else
+        {*/
+            block(c.freeType, constraint);
+            return false;
+        //}
     }
-
-    auto test = unresolvedConstraints.find(c.primitiveType);
-    test = test;
 
     TypeId bindTo = c.primitiveType;
 
@@ -2926,11 +2938,52 @@ NotNull<Constraint> ConstraintSolver::pushConstraint(NotNull<Scope> scope, const
 
     if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
     {
-        printf("Constraint Pushed!\n\t%s", toString(*c).c_str());
+        printf(
+            "\033[38;2;180;180;70m"
+            "Constraint Pushed!" "\033[0m"
+            "\n\t%s" "\n", toString(*c).c_str()
+        );
     } // CUSTOM-1
 
     solverConstraints.push_back(std::move(c));
     unsolvedConstraints.push_back(borrow);
+
+    return borrow;
+}
+
+// Push a Constraint right at the position after a specific constraint.
+NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
+    NotNull<Scope> scope,
+    const Location& location,
+    ConstraintV cv,
+    const Constraint& targetConstraint
+)
+{
+    std::unique_ptr<Constraint> c = std::make_unique<Constraint>(scope, location, std::move(cv));
+    NotNull<Constraint> borrow = NotNull(c.get());
+
+    auto it = std::find(unsolvedConstraints.begin(), unsolvedConstraints.end(), NotNull(&targetConstraint));
+    // If not at the end
+    if (it != unsolvedConstraints.end())
+    {
+        // Increment index by 1, to insert after found constraint.
+        it += 1;
+    }
+
+    if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
+    {
+        printf(
+            "\033[38;2;180;180;70m"
+            "Constraint Pushed After!"
+            "\033[0m"
+            "\n\t%s"
+            "\n",
+            toString(*c).c_str()
+        );
+    } // CUSTOM-1
+
+    solverConstraints.push_back(std::move(c));
+    unsolvedConstraints.insert(it, borrow);
 
     return borrow;
 }

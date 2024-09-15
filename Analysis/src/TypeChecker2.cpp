@@ -3015,6 +3015,30 @@ PropertyType TypeChecker2::hasIndexTypeFromType(
             if (isPrim(indexType, PrimitiveType::String))
                 return {NormalizationResult::True, {tt->indexer->indexResultType}};
             // If the indexer looks like { [any] : _} - the prop lookup should be allowed!
+            else if (auto indexTy = get<UnionType>(indexType))
+            { // CUSTOM-FIX-1
+
+                // If the Indexer is a UnionType
+                // TODO: This is looping everytime, on every request, through everything?
+                // That doesn't sound good. But I am not sure if the other parts do that as well.
+                auto visitOption = [&](TypeId& option, const std::string& prop) -> PropertyType
+                {
+                    if (auto tySingleton = get<SingletonType>(option))
+                        if (auto ty = get<StringSingleton>(tySingleton))
+                            if (ty->value == prop)
+                                return {NormalizationResult::True, {tt->indexer->indexResultType}};
+                };
+
+                for (TypeId option : indexTy->options)
+                {
+                    option = follow(option);
+
+                    if (get<UnionType>(option))
+                        return visitOption(option, prop);
+
+                    return visitOption(option, prop);
+                }
+            }
             else if (get<AnyType>(indexType) || get<UnknownType>(indexType))
                 return {NormalizationResult::True, {tt->indexer->indexResultType}};
         }

@@ -172,7 +172,7 @@ public:
     bool tryDispatch(const TypeAliasExpansionConstraint& c, NotNull<const Constraint> constraint);
     bool tryDispatch(const FunctionCallConstraint& c, NotNull<const Constraint> constraint);
     bool tryDispatch(const FunctionCheckConstraint& c, NotNull<const Constraint> constraint);
-    bool tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint);
+    bool tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint, bool force);
     bool tryDispatch(const HasPropConstraint& c, NotNull<const Constraint> constraint);
 
 
@@ -295,6 +295,7 @@ public:
      * @param cv the body of the constraint.
      **/
     NotNull<Constraint> pushConstraint(NotNull<Scope> scope, const Location& location, ConstraintV cv);
+    NotNull<Constraint> pushConstraintAfter(NotNull<Scope> scope, const Location& location, ConstraintV cv, const Constraint& constraint);
 
     /**
      * Attempts to resolve a module from its module information. Returns the
