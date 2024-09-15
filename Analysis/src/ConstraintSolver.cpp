@@ -2980,6 +2980,7 @@ NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
             // Increment based on offset
             // Because they get inserted like so C, B, A
             // And we want A, B, C
+            // for some reason I have to +1 this as well to work
             it += curUnsolvedConstraintPushOffset + 1;
 
             // Increase offset

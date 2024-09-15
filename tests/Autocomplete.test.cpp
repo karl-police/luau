@@ -372,9 +372,9 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        {FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
     };
@@ -417,7 +417,7 @@ tbl_C.entry4 = "hi2"
 local test = nil :: typeof(tbl_C)
 local tbl_ABC = nil :: typeof(tbl_A) & tbl_B & typeof(tbl_C)
 
-local indexesABC = nil :: keyof<typeof(tbl_C)>
+local indexesABC = nil :: keyof<typeof(tbl_ABC)>
 )");
 
     //auto test1 = toString(requireTypeAlias("tbl_B"));

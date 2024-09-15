@@ -2415,24 +2415,11 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
 
 
-    //TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
+    TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
 
 
-    BlockedType testBlocked = BlockedType{};
-
-
-
-    TypeId newTblTy = ctx->arena->addType(testBlocked);
-
-    for (auto& c : ctx->solver->unsolvedConstraints)
-    {
-        
-    }
-
-    if (auto refCount = ctx->solver->unresolvedConstraints.find(instance))
-    {
-        printf("HELP: %s", refCount);
-    }
+    //BlockedType testBlocked = BlockedType{};
+    //TypeId newTblTy = ctx->arena->addType(testBlocked);
 
     return {newTblTy, false, {}, {}};
     /*return {ctx->arena->addType(
