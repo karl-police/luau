@@ -335,7 +335,8 @@ struct InstantiationQueuer : TypeOnceVisitor
 
     bool visit(TypeId ty, const TypeFunctionInstanceType&) override
     {
-        solver->pushConstraint(scope, location, ReduceConstraint{ty});
+        solver->pushConstraintAfter(scope, location, ReduceConstraint{ty}, *solver->currentConstraintRef, true);
+        //solver->pushConstraint(scope, location, ReduceConstraint{ty});
         return true;
     }
 
@@ -477,6 +478,10 @@ void ConstraintSolver::run()
                 );
                 // CUSTOM-1
             }
+
+            // Set current Constraint
+            currentConstraintRef = c.get(); // CUSTOM-4
+            curUnsolvedConstraintPushOffset = 0; // reset // CUSTOM-4
 
             bool success = tryDispatch(c, force);
 
@@ -2939,7 +2944,7 @@ NotNull<Constraint> ConstraintSolver::pushConstraint(NotNull<Scope> scope, const
     if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
     {
         printf(
-            "\033[38;2;180;180;70m"
+            "\033[38;2;255;165;0m"
             "Constraint Pushed!" "\033[0m"
             "\n\t%s" "\n", toString(*c).c_str()
         );
@@ -2955,12 +2960,13 @@ NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
     NotNull<Scope> scope,
     const Location& location,
     ConstraintV cv,
-    const Constraint& afterConstraint
+    const Constraint& afterConstraint,
+    bool b_isFromRecursive // optional
 )
 {
     std::unique_ptr<Constraint> c = std::make_unique<Constraint>(scope, location, std::move(cv));
     NotNull<Constraint> borrow = NotNull(c.get());
-
+    
     // Get the location of the constraint from the unsolvedConstraints.
     auto it = std::find(unsolvedConstraints.begin(), unsolvedConstraints.end(), NotNull(&afterConstraint));
     // If not at the end
@@ -2968,6 +2974,18 @@ NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
     {
         // Increment index by 1, to insert after found constraint.
         it += 1;
+
+        if (b_isFromRecursive)
+        {
+            // Increment based on offset
+            // Because they get inserted like so C, B, A
+            // And we want A, B, C
+            it += curUnsolvedConstraintPushOffset + 1;
+
+            // Increase offset
+            // This resets every dispatch.
+            curUnsolvedConstraintPushOffset += 1;
+        }
     }
     else
         LUAU_ASSERT("The provided \"afterConstraint\" was not found in \"unsolvedConstraints\".");
@@ -2976,7 +2994,7 @@ NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
     if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
     {
         printf(
-            "\033[38;2;140;80;35m"
+            "\033[38;2;255;165;0m"
             "Constraint Pushed After!"
             "\033[0m"
             "\n\t%s"

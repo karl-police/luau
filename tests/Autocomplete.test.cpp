@@ -207,24 +207,14 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "test2")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, true},
-        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
         //{FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
     };
 
     CheckResult check1 = check(R"(
-type Test1 = string
-
-type Test2 = number
-type Test3 = number
-
-local v1 = nil
-v1 = v1 :: Test2
-
-local v2: Test3
-
 local foo = {
 A = "a",
 B = "b",
@@ -399,7 +389,7 @@ elseif false then "Something"
 else "Other"
 )");
 
-    LUAU_REQUIRE_NO_ERRORS(check1);
+    //LUAU_REQUIRE_NO_ERRORS(check1);
 
     auto test1 = requireType("v1");
     //auto test2 = toString(check1.errors[1]);

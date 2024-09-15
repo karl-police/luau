@@ -98,6 +98,12 @@ struct ConstraintSolver
     DenseHashSet<TypeId> generalizedTypes_{nullptr};
     const NotNull<DenseHashSet<TypeId>> generalizedTypes{&generalizedTypes_};
 
+
+    // The current Constraint that is being processed, can be nullptr.
+    const Constraint* currentConstraintRef; // CUSTOM-4
+    // Offset of current pushed constraints
+    int curUnsolvedConstraintPushOffset; // CUSTOM-4
+
     // Recorded errors that take place within the solver.
     ErrorVec errors;
 
@@ -299,8 +305,17 @@ public:
     /** Push a Constraint right at the position after a specific constraint.
      * @param cv the body of the constraint.
      * @param afterConstraint The constraint to find in unsolvedConstraints to insert the new constraint after at.
+     * @param b_isFromRecursive
+        Whether this function is being called from the current dispatch through a recursive context
+        to apply insert offset.
      **/
-    NotNull<Constraint> pushConstraintAfter(NotNull<Scope> scope, const Location& location, ConstraintV cv, const Constraint& afterConstraint);
+    NotNull<Constraint> pushConstraintAfter(
+        NotNull<Scope> scope,
+        const Location& location,
+        ConstraintV cv,
+        const Constraint& afterConstraint,
+        bool b_isFromRecursive = false
+    );
 
     /**
      * Attempts to resolve a module from its module information. Returns the
