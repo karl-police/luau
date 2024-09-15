@@ -130,7 +130,10 @@ static bool matchAssert(const AstExprCall& call)
 }*/
 [[maybe_unused]] static void LogGeneratorAddConstraint(const ScopePtr& scope, const Constraint& constraint)
 {
-    printf("Constraint Add:\n\t%s\n\n", toString(constraint).c_str());
+    printf(
+        "\033[38;2;90;185;90m" "Constraint Add:"
+        "\033[0m" "\n\t%s\n\n", toString(constraint).c_str()
+    );
 } // CUSTOM-2
 
 class AstDumpVisitor : AstVisitor {
@@ -3250,6 +3253,13 @@ TypeId ConstraintGenerator::resolveType(const ScopePtr& scope, AstType* ty, bool
     }
 
     module->astResolvedTypes[ty] = result;
+
+    if (FFlag::DebugLuauLogSolverGenerator)
+    {
+        printf("Resolved:" "\n\t");
+        dump(result); // this does the line break
+    } // CUSTOM-2
+
     return result;
 }
 
