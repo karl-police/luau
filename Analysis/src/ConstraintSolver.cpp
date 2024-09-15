@@ -335,8 +335,8 @@ struct InstantiationQueuer : TypeOnceVisitor
 
     bool visit(TypeId ty, const TypeFunctionInstanceType&) override
     {
-        solver->pushConstraintAfter(scope, location, ReduceConstraint{ty}, *solver->currentConstraintRef, true);
-        //solver->pushConstraint(scope, location, ReduceConstraint{ty}); // CUSTOM-4
+        //solver->pushConstraintAfter(scope, location, ReduceConstraint{ty}, *solver->currentConstraintRef, true);
+        solver->pushConstraint(scope, location, ReduceConstraint{ty}); // CUSTOM-4
         return true;
     }
 
@@ -983,10 +983,10 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
     // Adding ReduceConstraint on type function for the constraint solver
     if (auto typeFn = get<TypeFunctionInstanceType>(follow(tf->type)))
-        pushConstraintAfter(
+        /*pushConstraintAfter(
             NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type}, *constraint.get()
-        );
-        //pushConstraint(NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type});
+        );*/ // CUSTOM-4
+        pushConstraint(NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type});
 
     // If there are no parameters to the type function we can just use the type
     // directly.
