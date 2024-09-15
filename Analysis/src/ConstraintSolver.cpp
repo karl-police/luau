@@ -2955,24 +2955,28 @@ NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
     NotNull<Scope> scope,
     const Location& location,
     ConstraintV cv,
-    const Constraint& targetConstraint
+    const Constraint& afterConstraint
 )
 {
     std::unique_ptr<Constraint> c = std::make_unique<Constraint>(scope, location, std::move(cv));
     NotNull<Constraint> borrow = NotNull(c.get());
 
-    auto it = std::find(unsolvedConstraints.begin(), unsolvedConstraints.end(), NotNull(&targetConstraint));
+    // Get the location of the constraint from the unsolvedConstraints.
+    auto it = std::find(unsolvedConstraints.begin(), unsolvedConstraints.end(), NotNull(&afterConstraint));
     // If not at the end
     if (it != unsolvedConstraints.end())
     {
         // Increment index by 1, to insert after found constraint.
         it += 1;
     }
+    else
+        LUAU_ASSERT("The provided \"afterConstraint\" was not found in \"unsolvedConstraints\".");
+
 
     if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
     {
         printf(
-            "\033[38;2;180;180;70m"
+            "\033[38;2;140;80;35m"
             "Constraint Pushed After!"
             "\033[0m"
             "\n\t%s"
