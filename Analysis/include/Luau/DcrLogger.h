@@ -149,3 +149,13 @@ private:
 };
 
 } // namespace Luau
+
+
+namespace Colors
+{
+    // Get the Escape Character
+#define ColorEscapeChar "\033"
+
+#define ColorRGB(R, G, B) "2;" #R ";" #G ";" #B
+#define ColorFgRGB(R, G, B) ColorEscapeChar "[38;" ColorRGB(R, G, B) "m"
+};
