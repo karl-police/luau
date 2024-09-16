@@ -3017,7 +3017,6 @@ PropertyType TypeChecker2::hasIndexTypeFromType(
             // If the indexer looks like { [any] : _} - the prop lookup should be allowed!
             /*else if (auto indexTy = get<UnionType>(indexType))
             {
-
                 // If the Indexer is a UnionType
                 // TODO: This is looping everytime, on every request, through everything?
                 // That doesn't sound good. But I am not sure if the other parts do that as well.
@@ -3030,14 +3029,42 @@ PropertyType TypeChecker2::hasIndexTypeFromType(
 
                     // If all fails
                     return {NormalizationResult::False, {}};
+                };
+
+                auto visitUnionOptions = [&](UnionType unionTy, const std::string& prop) -> PropertyType
+                {
+                    for (TypeId option : unionTy.options)
+                    {
+                        option = follow(option);
+
+                        // No recurse
+                        if (get<UnionType>(option))
+                            return {NormalizationResult::False, {}};
+
+                        PropertyType result = visitOption(option, prop);
+                        if (result.present == NormalizationResult::False)
+                            continue; // Continue searching if it failed
+
+                        // Otherwise return
+                        return result;
+                    }
+
+                    // If all fails
+                    return {NormalizationResult::False, {}};
                 }; // CUSTOM-3
 
                 for (TypeId option : indexTy->options)
                 {
                     option = follow(option);
 
-                    if (get<UnionType>(option))
-                        return visitOption(option, prop);
+                    if (auto unionTy = get<UnionType>(option))
+                    {
+                        PropertyType result = visitUnionOptions(*unionTy, prop);
+                        if (result.present == NormalizationResult::False)
+                            continue; // Continue searching if it failed
+                        else
+                            return result; // Otherwise return
+                    }
 
                     return visitOption(option, prop);
                 }
