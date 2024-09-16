@@ -3027,6 +3027,9 @@ PropertyType TypeChecker2::hasIndexTypeFromType(
                         if (auto ty = get<StringSingleton>(tySingleton))
                             if (ty->value == prop)
                                 return {NormalizationResult::True, {tt->indexer->indexResultType}};
+
+                    // If all fails
+                    return {NormalizationResult::False, {}};
                 }; // CUSTOM-3
 
                 for (TypeId option : indexTy->options)
