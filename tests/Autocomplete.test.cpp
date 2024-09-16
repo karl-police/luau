@@ -317,12 +317,12 @@ tbl.TestKey = 5;
     auto test2 = requireType("tbl");
 }
 
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest22")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
         //{FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
@@ -337,8 +337,6 @@ v1 = if true then stringButItIsHere
 elseif false then "Something"
 else "Other"
 )");
-
-    //LUAU_REQUIRE_NO_ERRORS(check1);
 
     auto test1 = requireType("v1");
     //auto test2 = toString(check1.errors[1]);
