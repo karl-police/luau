@@ -282,41 +282,6 @@ tbl.TestKey = 5;
     //auto ac = autocomplete('1');
 }
 
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_used_as_table_indexer_assignProp_no_error")
-{
-    if (!FFlag::LuauSolverV2)
-        return;
-
-    CheckResult check1 = check(R"(
---!strict
-
-type NumberTable = {
-    One: number,
-    Two: number,
-    Three: number
-}
-
-type Indexables = keyof<NumberTable>
-
-type Test = {
-    TestKey: number,
-    [Indexables | "Four"]: number
-}
-
-local tbl = {} :: Test 
-
-tbl["Three"] = 3;
-tbl.Three = 3;
-tbl.Four = 4;
-tbl.TestKey = 5;
-)");
-
-    // It should be possible to do "tbl.Three" without erroring.
-    // LUAU_REQUIRE_NO_ERRORS(check1);
-
-    auto test2 = requireType("tbl");
-}
-
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest22")
 {
     ScopedFastFlag sff[]{
