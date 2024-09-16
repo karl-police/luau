@@ -203,38 +203,7 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "test2")
-{
-    ScopedFastFlag sff[]{
-        {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        //{FFlag::DebugLuauLogSolverGenerator, true},
-        //{FFlag::DebugLuauLogBindings, true},
-        //{FFlag::DebugLuauLogSolverToJson, true}
-    };
-
-    CheckResult check1 = check(R"(
-local foo = {
-A = "a",
-B = "b",
-C = "c",
-}
-
-type Foo = keyof<typeof(foo)>
-
-local a: {Foo} = {
-  "A"
-}
-)");
-
-    // LUAU_REQUIRE_NO_ERRORS(check1);
-
-    auto Foo = requireTypeAlias("Foo");
-    auto test1 = toString(check1.errors[0]);
-}
-
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "test1")
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "test22")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
@@ -246,8 +215,6 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "test1")
     };
 
     CheckResult check1 = check(R"(
---!strict
-
 local foo = {
 A = "a",
 B = "b",
@@ -271,15 +238,6 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "union_used_as_table_indexer_assignProp_no_
 {
     if (!FFlag::LuauSolverV2)
         return;
-
-    ScopedFastFlag sff[]{
-        {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        {FFlag::DebugLuauLogSolverGenerator, true},
-        //{FFlag::DebugLuauLogBindings, true},
-        //{FFlag::DebugLuauLogSolverToJson, true}
-    };
 
     CheckResult check1 = check(R"(
 --!strict
@@ -329,15 +287,6 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_used_as_table_indexer_assignProp_no_
     if (!FFlag::LuauSolverV2)
         return;
 
-    ScopedFastFlag sff[]{
-        {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        {FFlag::DebugLuauLogSolverGenerator, true},
-        //{FFlag::DebugLuauLogBindings, true},
-        //{FFlag::DebugLuauLogSolverToJson, true}
-    };
-
     CheckResult check1 = check(R"(
 --!strict
 
@@ -372,8 +321,8 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, true},
-        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
         //{FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
@@ -399,8 +348,8 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolver, true},
-        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
