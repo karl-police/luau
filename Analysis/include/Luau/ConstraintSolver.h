@@ -101,9 +101,7 @@ struct ConstraintSolver
 
 
     // The current Constraint that is being processed, can be nullptr.
-    const Constraint* currentConstraintRef; // CUSTOM-4
-    // Offset of current pushed constraints
-    const Constraint* lastPushedConstraintRef; // CUSTOM-4
+    //const Constraint* currentConstraintRef; // CUSTOM-4
 
     // Recorded errors that take place within the solver.
     ErrorVec errors;

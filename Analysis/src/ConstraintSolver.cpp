@@ -3019,57 +3019,6 @@ NotNull<Constraint> ConstraintSolver::pushConstraint(NotNull<Scope> scope, const
     return borrow;
 }
 
-NotNull<Constraint> ConstraintSolver::pushConstraintTest(
-    NotNull<Scope> scope,
-    const Location& location,
-    ConstraintV cv,
-    bool b_isFromRecursive // optional
-)
-{
-    std::unique_ptr<Constraint> c = std::make_unique<Constraint>(scope, location, std::move(cv));
-    NotNull<Constraint> borrow = NotNull(c.get());
-    
-    if (b_isFromRecursive)
-    {
-        if (lastPushedConstraintRef)
-        {
-            block(NotNull(lastPushedConstraintRef), borrow);
-            //block(NotNull(lastPushedConstraintRef), NotNull(currentConstraintRef));
-            lastPushedConstraintRef = borrow;
-        }
-        else
-        {
-            block(static_cast<NotNull<const Constraint>>(borrow), NotNull(currentConstraintRef));
-            // block(static_cast<NotNull<const Constraint>>(borrow), NotNull(currentConstraintRef));
-            lastPushedConstraintRef = borrow;
-        }
-    }
-    else
-    {
-        //block(NotNull(currentConstraintRef), static_cast<NotNull<const Constraint>>(borrow));
-        //block(static_cast<NotNull<const Constraint>>(borrow), NotNull(currentConstraintRef));
-        lastPushedConstraintRef = borrow;
-    }
-
-
-    if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
-    {
-        printf(
-            "\033[38;2;255;165;0m"
-            "Constraint Pushed After!"
-            "\033[0m"
-            "\n\t%s"
-            "\n",
-            toString(*c).c_str()
-        );
-    } // CUSTOM-1
-
-    solverConstraints.push_back(std::move(c));
-    unsolvedConstraints.push_back(borrow);
-
-    return borrow;
-}
-
 TypeId ConstraintSolver::resolveModule(const ModuleInfo& info, const Location& location)
 {
     if (info.name.empty())
