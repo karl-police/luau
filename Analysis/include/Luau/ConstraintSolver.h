@@ -14,7 +14,6 @@
 #include "Luau/TypeCheckLimits.h"
 #include "Luau/TypeFwd.h"
 #include "Luau/Variant.h"
-#include "Luau/VisitType.h" // CUSTOM-4
 
 #include <utility>
 #include <vector>
