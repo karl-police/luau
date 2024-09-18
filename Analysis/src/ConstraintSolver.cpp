@@ -572,8 +572,7 @@ struct InstantiationQueuer : TypeOnceVisitor
 
     bool visit(TypeId ty, const PendingExpansionType& petv) override
     {
-        auto test = solver->pushConstraint(scope, location, TypeAliasExpansionConstraint{ty});
-
+        solver->pushConstraint(scope, location, TypeAliasExpansionConstraint{ty});
         return false;
     }
 
