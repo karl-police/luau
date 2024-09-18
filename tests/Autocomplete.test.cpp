@@ -380,6 +380,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
         {FFlag::LuauSolverV2, true},
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
