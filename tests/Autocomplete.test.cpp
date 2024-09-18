@@ -20,6 +20,7 @@ LUAU_FASTFLAG(DebugLuauLogBindings)
 LUAU_FASTFLAG(DebugLuauLogSolverToJson)
 LUAU_FASTFLAG(DebugLuauLogSolverMoreDetails)
 LUAU_FASTFLAG(DebugLuauLogSolverGenerator)
+LUAU_FASTFLAG(DebugLuauMagicTypes)
 
 using namespace Luau;
 
@@ -203,6 +204,41 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest33")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverToJson, true}
+    };
+
+    CheckResult check1 = check(R"(
+
+
+type FieldCell = {any}
+function FinalizeField(): ()
+    local cells: {[number]: FieldCell} = {}
+    local neighbor: FieldCell?
+
+    for index, currentCell in cells do
+        local neighbor: FieldCell?
+        neighbor = cells[index]
+        if not neighbor then
+            neighbor = {} :: FieldCell
+            cells[index] = neighbor
+        end
+    end
+end
+)");
+
+    // LUAU_REQUIRE_NO_ERRORS(check1);
+
+    //auto test = toString(check1.errors[0]);
+}
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "test22")
 {
     ScopedFastFlag sff[]{
@@ -307,6 +343,37 @@ else "Other"
     //auto test2 = toString(check1.errors[1]);
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issue1")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverToJson, true},
+    };
+
+    // Explanation https://devforum.roblox.com/t/new-type-solver-beta/3155804/97
+
+    CheckResult result = check(R"(
+        --!strict
+        local PlayerData = {
+            Coins = 0,
+            Level = 1,
+            Exp = 0,
+            MaxExp = 100
+        }
+        type Keys = keyof<typeof(PlayerData)>
+        -- This function makes it think that there's going to be a pending expansion
+        local function UpdateData(key: Keys, value)
+            PlayerData[key] = value
+        end
+        UpdateData("Coins", 2)
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
 {
     ScopedFastFlag sff[]{
@@ -355,7 +422,7 @@ test.idk = "hi"
 local tbl_A = {entry1 = 1}
 type tbl_B = {entry2: nil}
 
-local test2 = test :: tabletype<>
+local test2 = test :: tabletype<"Unsealed">
 test2.hello = "hi"
 test2.hello2 = "hi"
 

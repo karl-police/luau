@@ -14,6 +14,7 @@
 #include "Luau/TypeCheckLimits.h"
 #include "Luau/TypeFwd.h"
 #include "Luau/Variant.h"
+#include "Luau/VisitType.h" // CUSTOM-4
 
 #include <utility>
 #include <vector>
@@ -102,7 +103,7 @@ struct ConstraintSolver
     // The current Constraint that is being processed, can be nullptr.
     const Constraint* currentConstraintRef; // CUSTOM-4
     // Offset of current pushed constraints
-    int curUnsolvedConstraintPushOffset; // CUSTOM-4
+    const Constraint* lastPushedConstraintRef; // CUSTOM-4
 
     // Recorded errors that take place within the solver.
     ErrorVec errors;
@@ -302,19 +303,11 @@ public:
      **/
     NotNull<Constraint> pushConstraint(NotNull<Scope> scope, const Location& location, ConstraintV cv);
 
-    /** Push a Constraint right at the position after a specific constraint.
-     * @param cv the body of the constraint.
-     * @param afterConstraint The constraint to find in unsolvedConstraints to insert the new constraint after at.
-     * @param b_isFromRecursive
-        Whether this function is being called from the current dispatch through a recursive context
-        to apply insert offset.
-     **/
-    NotNull<Constraint> pushConstraintAfter(
+    NotNull<Constraint> pushConstraintTest(
         NotNull<Scope> scope,
         const Location& location,
         ConstraintV cv,
-        const Constraint& afterConstraint,
-        bool b_isFromRecursive = false
+        bool isDependency = false
     );
 
     /**
@@ -407,6 +400,248 @@ public:
 
     ToStringOptions opts;
 };
+
+// CUSTOM-4
+/*struct TypeFinder : TypeOnceVisitor
+{
+    TypeId tyToFind;
+    bool hasFoundType = false;
+
+    // SOLID Principle for telling that we found the type.
+    void makeFound(TypeId ty)
+    {
+        hasFoundType = true;
+    }
+
+    // Reset the boolean
+    // so we don't tell that we found a type we didn't actually find.
+    void reset() {
+        hasFoundType = false;
+    }
+
+    bool visit(TypeId ty) override
+    {
+        ty = follow(ty);
+
+        if (ty == tyToFind)
+            makeFound(ty); // If we found the type
+
+        return true;
+    }
+
+    // Override for IntersectionTypes
+    bool visit(TypeId ty, const IntersectionType& iTy) override {
+        for (TypeId part : iTy.parts)
+        {
+            part = follow(part);
+
+            if (part == tyToFind)
+                makeFound(part); // If we found the type
+        }
+
+        return visit(ty);
+    }
+
+    bool isMatch(TypeId ty)
+    {
+        reset();
+
+        if (ty == tyToFind)
+            makeFound(ty);
+        else
+            traverse(ty);
+
+        if (hasFoundType == true)
+            return true;
+        else
+            return false;
+    }
+};*/
+
+// CUSTOM-4
+/*struct ConstraintTypeFinder
+{
+    TypeId tyToFind;
+    TypeFinder typeFinder{};
+
+    explicit ConstraintTypeFinder(TypeId tyToFind)
+        : tyToFind(tyToFind)
+    {
+        typeFinder.tyToFind = tyToFind;
+    }
+
+    bool visit(AssignIndexConstraint c)
+    {
+        if (typeFinder.isMatch(c.indexType))
+            return true;
+        if (typeFinder.isMatch(c.lhsType))
+            return true;
+        if (typeFinder.isMatch(c.propType))
+            return true;
+        if (typeFinder.isMatch(c.rhsType))
+            return true;
+
+        return false;
+    }
+    bool visit(AssignPropConstraint c)
+    {
+        if (typeFinder.isMatch(c.lhsType))
+            return true;
+        if (typeFinder.isMatch(c.propType))
+            return true;
+        if (typeFinder.isMatch(c.rhsType))
+            return true;
+
+        return false;
+    }
+    bool visit(EqualityConstraint c)
+    {
+        if (typeFinder.isMatch(c.assignmentType))
+            return true;
+        if (typeFinder.isMatch(c.resultType))
+            return true;
+
+        return false;
+    }
+    bool visit(FunctionCallConstraint c)
+    {
+        if (typeFinder.isMatch(c.fn))
+            return true;
+        // argPacks not included
+
+        return false;
+    }
+    bool visit(FunctionCheckConstraint c)
+    {
+        if (typeFinder.isMatch(c.fn))
+            return true;
+        // argsPacks not included
+
+        return false;
+    }
+    bool visit(GeneralizationConstraint c)
+    {
+        if (typeFinder.isMatch(c.generalizedType))
+            return true;
+        if (typeFinder.isMatch(c.sourceType))
+            return true;
+        for (auto ty : c.interiorTypes)
+        {
+            if (typeFinder.isMatch(ty))
+                return true;
+        }
+
+        return false;
+    }
+    bool visit(IterableConstraint c)
+    {
+        for (auto ty : c.variables)
+        {
+            if (typeFinder.isMatch(ty))
+                return true;
+        }
+
+        return false;
+    }
+    bool visit(NameConstraint c)
+    {
+        if (typeFinder.isMatch(c.namedType))
+            return true;
+
+        for (auto ty : c.typeParameters)
+        {
+            if (typeFinder.isMatch(ty))
+                return true;
+        }
+
+        return false;
+    }
+    bool visit(PackSubtypeConstraint c)
+    {
+        // ?
+        return false;
+    }
+    bool visit(PrimitiveTypeConstraint c)
+    {
+        if (typeFinder.isMatch(c.freeType))
+            return true;
+        if (typeFinder.isMatch(c.primitiveType))
+            return true;
+        // expectedType needed?
+
+        return false;
+    }
+    bool visit(ReduceConstraint c)
+    {
+        if (typeFinder.isMatch(c.ty))
+            return true;
+
+        return false;
+    }
+    bool visit(ReducePackConstraint c)
+    {
+        // ?
+        return false;
+    }
+    bool visit(SubtypeConstraint c)
+    {
+        if (typeFinder.isMatch(c.subType))
+            return true;
+        if (typeFinder.isMatch(c.superType))
+            return true;
+
+        return false;
+    }
+    bool visit(TypeAliasExpansionConstraint c)
+    {
+        if (typeFinder.isMatch(c.target))
+            return true;
+
+        return false;
+    }
+    bool visit(UnpackConstraint c)
+    {
+        // ?
+        return false;
+    }
+
+
+    // Returns true if it found the type.
+    bool traverseAndFind(ConstraintV cV)
+    {
+        if (auto c = get_if<AssignIndexConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<AssignPropConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<EqualityConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<FunctionCallConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<FunctionCheckConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<GeneralizationConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<IterableConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<NameConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<PackSubtypeConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<PrimitiveTypeConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<ReduceConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<ReducePackConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<SubtypeConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<TypeAliasExpansionConstraint>(&cV))
+            return visit(*c);
+        else if (auto c = get_if<UnpackConstraint>(&cV))
+            return visit(*c);
+    }
+};*/
+
 
 void dump(NotNull<Scope> rootScope, struct ToStringOptions& opts);
 

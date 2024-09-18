@@ -329,14 +329,55 @@ struct InstantiationQueuer : TypeOnceVisitor
 
     bool visit(TypeId ty, const PendingExpansionType& petv) override
     {
-        solver->pushConstraint(scope, location, TypeAliasExpansionConstraint{ty});
+        auto test = solver->pushConstraint(scope, location, TypeAliasExpansionConstraint{ty});
+
         return false;
     }
 
     bool visit(TypeId ty, const TypeFunctionInstanceType&) override
     {
-        //solver->pushConstraintAfter(scope, location, ReduceConstraint{ty}, *solver->currentConstraintRef, true);
-        solver->pushConstraint(scope, location, ReduceConstraint{ty}); // CUSTOM-4
+        auto newConstraint = solver->pushConstraint(scope, location, ReduceConstraint{ty});
+
+        // CUSTOM-4
+        /*if (auto currentC = get_if<TypeAliasExpansionConstraint>(&solver->currentConstraintRef->c)) {
+            
+            auto cFinder = ConstraintTypeFinder(currentC->target);
+
+            for (auto constraint : solver->constraints)
+            {
+                if (solver->currentConstraintRef == constraint || newConstraint == constraint)
+                    continue;
+
+                if (cFinder.traverseAndFind(constraint.get()->c)) {
+                    solver->block(static_cast<NotNull<const Constraint>>(newConstraint), constraint);
+                }
+            }
+        }*/
+
+        /* int count = 0;
+        for (auto constraint : solver->constraints)
+        {
+            count += 1;
+
+
+
+            if (count >= 10 && count <= 10)
+            {
+                if (auto test = get_if<TypeAliasExpansionConstraint>(&constraint.get()->c))
+                {
+                    printf("REALLY REALLY IMPORTANT!!!\n\n");
+
+                    if (auto pety = get<PendingExpansionType>(test->target))
+                    {
+                        pety = pety;
+                    }
+                }
+
+                solver->block(static_cast<NotNull<const Constraint>>(newConstraint), constraint);
+            }
+            
+        }*/
+
         return true;
     }
 
@@ -480,8 +521,7 @@ void ConstraintSolver::run()
             }
 
             // Set current Constraint
-            currentConstraintRef = c.get(); // CUSTOM-4
-            curUnsolvedConstraintPushOffset = 0; // reset // CUSTOM-4
+            //currentConstraintRef = c.get(); // CUSTOM-4
 
             bool success = tryDispatch(c, force);
 
@@ -983,9 +1023,6 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
     // Adding ReduceConstraint on type function for the constraint solver
     if (auto typeFn = get<TypeFunctionInstanceType>(follow(tf->type)))
-        /*pushConstraintAfter(
-            NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type}, *constraint.get()
-        );*/ // CUSTOM-4
         pushConstraint(NotNull(constraint->scope.get()), constraint->location, ReduceConstraint{tf->type});
 
     // If there are no parameters to the type function we can just use the type
@@ -1162,7 +1199,7 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
     instantiatedAliases[signature] = target;
 
-    return true;
+    return false;
 }
 
 bool ConstraintSolver::tryDispatch(const FunctionCallConstraint& c, NotNull<const Constraint> constraint)
@@ -2804,6 +2841,32 @@ struct Blocker : TypeOnceVisitor
     }
 };
 
+struct BlockerConstraint : TypeOnceVisitor
+{
+    NotNull<ConstraintSolver> solver;
+    NotNull<const Constraint> constraint;
+
+    bool blocked = false;
+
+    explicit BlockerConstraint(NotNull<ConstraintSolver> solver, NotNull<const Constraint> constraint)
+        : solver(solver)
+        , constraint(constraint)
+    {
+    }
+
+    bool visit(TypeId ty, const PendingExpansionType&) override
+    {
+        blocked = true;
+        solver->block(ty, constraint);
+        return false;
+    }
+
+    bool visit(TypeId ty, const ClassType&) override
+    {
+        return false;
+    }
+};
+
 bool ConstraintSolver::blockOnPendingTypes(TypeId target, NotNull<const Constraint> constraint)
 {
     Blocker blocker{NotNull{this}, constraint};
@@ -2956,40 +3019,37 @@ NotNull<Constraint> ConstraintSolver::pushConstraint(NotNull<Scope> scope, const
     return borrow;
 }
 
-NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
+NotNull<Constraint> ConstraintSolver::pushConstraintTest(
     NotNull<Scope> scope,
     const Location& location,
     ConstraintV cv,
-    const Constraint& afterConstraint,
     bool b_isFromRecursive // optional
 )
 {
     std::unique_ptr<Constraint> c = std::make_unique<Constraint>(scope, location, std::move(cv));
     NotNull<Constraint> borrow = NotNull(c.get());
     
-    // Get the location of the constraint from the unsolvedConstraints.
-    auto it = std::find(unsolvedConstraints.begin(), unsolvedConstraints.end(), NotNull(&afterConstraint));
-    // If not at the end
-    if (it != unsolvedConstraints.end())
+    if (b_isFromRecursive)
     {
-        // Increment index by 1, to insert after found constraint.
-        it += 1;
-
-        if (b_isFromRecursive)
+        if (lastPushedConstraintRef)
         {
-            // Increment based on offset
-            // Because they get inserted like so C, B, A
-            // And we want A, B, C
-            // for some reason I have to +1 this as well to work
-            it += curUnsolvedConstraintPushOffset + 1;
-
-            // Increase offset
-            // This resets every dispatch.
-            curUnsolvedConstraintPushOffset += 1;
+            block(NotNull(lastPushedConstraintRef), borrow);
+            //block(NotNull(lastPushedConstraintRef), NotNull(currentConstraintRef));
+            lastPushedConstraintRef = borrow;
+        }
+        else
+        {
+            block(static_cast<NotNull<const Constraint>>(borrow), NotNull(currentConstraintRef));
+            // block(static_cast<NotNull<const Constraint>>(borrow), NotNull(currentConstraintRef));
+            lastPushedConstraintRef = borrow;
         }
     }
     else
-        LUAU_ASSERT("The provided \"afterConstraint\" was not found in \"unsolvedConstraints\".");
+    {
+        //block(NotNull(currentConstraintRef), static_cast<NotNull<const Constraint>>(borrow));
+        //block(static_cast<NotNull<const Constraint>>(borrow), NotNull(currentConstraintRef));
+        lastPushedConstraintRef = borrow;
+    }
 
 
     if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
@@ -3005,7 +3065,7 @@ NotNull<Constraint> ConstraintSolver::pushConstraintAfter(
     } // CUSTOM-1
 
     solverConstraints.push_back(std::move(c));
-    unsolvedConstraints.insert(it, borrow);
+    unsolvedConstraints.push_back(borrow);
 
     return borrow;
 }
