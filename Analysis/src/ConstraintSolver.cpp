@@ -599,30 +599,6 @@ struct InstantiationQueuer : TypeOnceVisitor
             }
         }*/
 
-        /* int count = 0;
-        for (auto constraint : solver->constraints)
-        {
-            count += 1;
-
-
-
-            if (count >= 10 && count <= 10)
-            {
-                if (auto test = get_if<TypeAliasExpansionConstraint>(&constraint.get()->c))
-                {
-                    printf("REALLY REALLY IMPORTANT!!!\n\n");
-
-                    if (auto pety = get<PendingExpansionType>(test->target))
-                    {
-                        pety = pety;
-                    }
-                }
-
-                solver->block(static_cast<NotNull<const Constraint>>(newConstraint), constraint);
-            }
-            
-        }*/
-
         return true;
     }
 
