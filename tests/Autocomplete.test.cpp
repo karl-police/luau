@@ -298,27 +298,16 @@ local tbl = {} :: Test
 
 type TestIndex = index<typeof(tbl), "Three">
 
-tbl["Three"] = 3;
-tbl.Three = 3;
-tbl.Four = 4;
-tbl.TestKey = 5;
+tbl.@1
 )");
 
-    // It should be possible to do "tbl.Three" without erroring.
-    //LUAU_REQUIRE_NO_ERRORS(check1);
-
-    auto test1 = requireTypeAlias("TestIndex");
-    auto test2 = requireType("tbl");
-    //auto test3 = toString(check1.errors[0]);
-
-    
     // TODO: This doesn't include the autocomplete fix
     // That has to be still made.
     // It is supposed to include the indexes from the UnionType
     // We can be glad that "strings" is the most used purpose for UnionType
     // and not numbers or userdata Objects
     // but it is possible to have more than just that
-    //auto ac = autocomplete('1');
+    auto ac = autocomplete('1');
 }
 
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest22")
