@@ -21,6 +21,9 @@ LUAU_FASTFLAG(DebugLuauLogSolverToJson)
 LUAU_FASTFLAG(DebugLuauLogSolverMoreDetails)
 LUAU_FASTFLAG(DebugLuauLogSolverGenerator)
 LUAU_FASTFLAG(DebugLuauMagicTypes)
+LUAU_FASTFLAG(LuauAutocompleteNewSolverLimit)
+LUAU_FASTINT(LuauTypeInferRecursionLimit)
+LUAU_FASTFLAG(LuauUseNormalizeIntersectionLimit)
 
 using namespace Luau;
 
@@ -4068,6 +4071,40 @@ TEST_CASE_FIXTURE(ACFixture, "autocomplete_response_perf1" * doctest::timeout(0.
 
     CHECK(ac.entryMap.count("true"));
     CHECK(ac.entryMap.count("Instance"));
+}
+
+TEST_CASE_FIXTURE(ACFixture, "autocomplete_subtyping_recursion_limit")
+{
+    // TODO: in old solver, type resolve can't handle the type in this test without a stack overflow
+    if (!FFlag::LuauSolverV2)
+        return;
+
+    ScopedFastFlag luauAutocompleteNewSolverLimit{FFlag::LuauAutocompleteNewSolverLimit, true};
+    ScopedFastInt luauTypeInferRecursionLimit{FInt::LuauTypeInferRecursionLimit, 10};
+
+    const int parts = 100;
+    std::string source;
+
+    source += "function f()\n";
+
+    std::string prefix;
+    for (int i = 0; i < parts; i++)
+        formatAppend(prefix, "(nil|({a%d:number}&", i);
+    formatAppend(prefix, "(nil|{a%d:number})", parts);
+    for (int i = 0; i < parts; i++)
+        formatAppend(prefix, "))");
+
+    source += "local x1 : " + prefix + "\n";
+    source += "local y : {a1:number} = x@1\n";
+
+    source += "end\n";
+
+    check(source);
+
+    auto ac = autocomplete('1');
+
+    CHECK(ac.entryMap.count("true"));
+    CHECK(ac.entryMap.count("x1"));
 }
 
 TEST_CASE_FIXTURE(ACFixture, "strict_mode_force")
