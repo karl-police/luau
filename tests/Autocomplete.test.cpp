@@ -254,9 +254,9 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "test22")
 
     CheckResult check1 = check(R"(
 local foo = {
-A = "a",
-B = "b",
-C = "c",
+A = "aa",
+B = "bb",
+C = "cc",
 }
 
 type Foo = keyof<typeof(foo)>
@@ -270,6 +270,7 @@ local a: {Foo} = {
 
     auto Foo = requireTypeAlias("Foo");
     auto test1 = toString(check1.errors[0]);
+    auto test2 = requireType("a");
 }
 
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "union_used_as_table_indexer_assignProp_no_error")
