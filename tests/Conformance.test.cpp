@@ -31,9 +31,11 @@ extern int optimizationLevel;
 void luaC_fullgc(lua_State* L);
 void luaC_validate(lua_State* L);
 
+LUAU_FASTFLAG(LuauMathMap)
 LUAU_FASTFLAG(DebugLuauAbortingChecks)
 LUAU_FASTINT(CodegenHeuristicsInstructionLimit)
 LUAU_FASTFLAG(LuauNativeAttribute)
+LUAU_DYNAMIC_FASTFLAG(LuauStackLimit)
 
 static lua_CompileOptions defaultOptions()
 {
@@ -652,6 +654,8 @@ TEST_CASE("Buffers")
 
 TEST_CASE("Math")
 {
+    ScopedFastFlag LuauMathMap{FFlag::LuauMathMap, true};
+
     runConformance("math.lua");
 }
 
@@ -752,6 +756,8 @@ TEST_CASE("Closure")
 
 TEST_CASE("Calls")
 {
+    ScopedFastFlag LuauStackLimit{DFFlag::LuauStackLimit, true};
+
     runConformance("calls.lua");
 }
 
@@ -791,6 +797,8 @@ static int cxxthrow(lua_State* L)
 
 TEST_CASE("PCall")
 {
+    ScopedFastFlag LuauStackLimit{DFFlag::LuauStackLimit, true};
+
     runConformance(
         "pcall.lua",
         [](lua_State* L)

@@ -23,6 +23,7 @@ LUAU_FASTINT(LuauCheckRecursionLimit);
 LUAU_FASTINT(LuauNormalizeCacheLimit);
 LUAU_FASTINT(LuauRecursionLimit);
 LUAU_FASTINT(LuauTypeInferRecursionLimit);
+LUAU_FASTFLAG(LuauNewSolverVisitErrorExprLvalues)
 
 using namespace Luau;
 
@@ -1681,6 +1682,54 @@ TEST_CASE_FIXTURE(Fixture, "leading_ampersand_no_type")
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK("Expected type, got <eof>" == toString(result.errors[0]));
     CHECK("*error-type*" == toString(requireTypeAlias("Amp")));
+}
+
+TEST_CASE_FIXTURE(Fixture, "react_lua_follow_free_type_ub")
+{
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
+
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        return function(Roact)
+            local Tree = Roact.Component:extend("Tree")
+
+            function Tree:render()
+                local breadth, components, depth, id, wrap =
+                    self.props.breadth, self.props.components, self.props.depth, self.props.id, self.props.wrap
+                local Box = components.Box
+                if depth == 0 then
+                    Roact.createElement(Box, {})
+                else
+                    Roact.createElement(Tree, {})
+                end
+
+            end
+        end
+    )"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "visit_error_nodes_in_lvalue")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauNewSolverVisitErrorExprLvalues, true}
+    };
+
+    // This should always fail to parse, but shouldn't assert. Previously this
+    // would assert as we end up _roughly_ parsing this (with a lot of error
+    // nodes) as:
+    //
+    //  do
+    //      x :: T, y = z
+    //  end
+    //
+    // We assume that `T` has some resolved type that is set up during
+    // constraint generation and resolved during constraint solving to
+    // be used during typechecking. We didn't descend into error nodes
+    // in lvalue positions.
+    LUAU_REQUIRE_ERRORS(check(R"(
+        --!strict
+        (::, 
+    )"));
 }
 
 TEST_SUITE_END();

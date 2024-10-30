@@ -5,6 +5,11 @@
 
 LUAU_FASTFLAG(LuauNativeAttribute);
 
+// The default value here is 643 because the first release in which this was implemented is 644,
+// and actively we want new changes to be off by default until they're enabled consciously.
+// The flag is placed in AST project here to be common in all Luau libraries
+LUAU_DYNAMIC_FASTINTVARIABLE(LuauTypeSolverRelease, 643)
+
 namespace Luau
 {
 
@@ -1139,6 +1144,14 @@ AstTypePackGeneric::AstTypePackGeneric(const Location& location, AstName name)
 void AstTypePackGeneric::visit(AstVisitor* visitor)
 {
     visitor->visit(this);
+}
+
+bool isLValue(const AstExpr* expr)
+{
+    return expr->is<AstExprLocal>()
+        || expr->is<AstExprGlobal>()
+        || expr->is<AstExprIndexName>()
+        || expr->is<AstExprIndexExpr>();
 }
 
 AstName getIdentifier(AstExpr* node)
