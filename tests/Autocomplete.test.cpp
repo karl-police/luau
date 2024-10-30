@@ -23,7 +23,6 @@ LUAU_FASTFLAG(DebugLuauLogSolverGenerator)
 LUAU_FASTFLAG(DebugLuauMagicTypes)
 LUAU_FASTFLAG(LuauAutocompleteNewSolverLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
-LUAU_FASTFLAG(LuauUseNormalizeIntersectionLimit)
 
 using namespace Luau;
 
@@ -36,7 +35,7 @@ template<class BaseType>
 struct ACFixtureImpl : BaseType
 {
     ACFixtureImpl()
-        : BaseType(true, true)
+        : BaseType(true)
     {
     }
 
@@ -4068,7 +4067,6 @@ TEST_CASE_FIXTURE(ACFixture, "autocomplete_subtyping_recursion_limit")
     if (!FFlag::LuauSolverV2)
         return;
 
-    ScopedFastFlag luauAutocompleteNewSolverLimit{FFlag::LuauAutocompleteNewSolverLimit, true};
     ScopedFastInt luauTypeInferRecursionLimit{FInt::LuauTypeInferRecursionLimit, 10};
 
     const int parts = 100;

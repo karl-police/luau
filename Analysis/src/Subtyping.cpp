@@ -22,7 +22,6 @@
 #include <algorithm>
 
 LUAU_FASTFLAGVARIABLE(DebugLuauSubtypingCheckPathValidity, false);
-LUAU_FASTFLAGVARIABLE(LuauAutocompleteNewSolverLimit, false);
 LUAU_DYNAMIC_FASTINT(LuauTypeSolverRelease)
 
 namespace Luau
@@ -261,92 +260,50 @@ SubtypingResult SubtypingResult::any(const std::vector<SubtypingResult>& results
 
 struct ApplyMappedGenerics : Substitution
 {
-    using MappedGenerics = DenseHashMap<TypeId, SubtypingEnvironment::GenericBounds>;
-    using MappedGenericPacks = DenseHashMap<TypePackId, TypePackId>;
-
     NotNull<BuiltinTypes> builtinTypes;
     NotNull<TypeArena> arena;
 
     SubtypingEnvironment& env;
 
-    MappedGenerics& mappedGenerics_DEPRECATED;
-    MappedGenericPacks& mappedGenericPacks_DEPRECATED;
-
-    ApplyMappedGenerics(
-        NotNull<BuiltinTypes> builtinTypes,
-        NotNull<TypeArena> arena,
-        SubtypingEnvironment& env,
-        MappedGenerics& mappedGenerics,
-        MappedGenericPacks& mappedGenericPacks
-    )
+    ApplyMappedGenerics(NotNull<BuiltinTypes> builtinTypes, NotNull<TypeArena> arena, SubtypingEnvironment& env)
         : Substitution(TxnLog::empty(), arena)
         , builtinTypes(builtinTypes)
         , arena(arena)
         , env(env)
-        , mappedGenerics_DEPRECATED(mappedGenerics)
-        , mappedGenericPacks_DEPRECATED(mappedGenericPacks)
     {
     }
 
     bool isDirty(TypeId ty) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 644)
-            return env.containsMappedType(ty);
-        else
-            return mappedGenerics_DEPRECATED.contains(ty);
+        return env.containsMappedType(ty);
     }
 
     bool isDirty(TypePackId tp) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 644)
-            return env.containsMappedPack(tp);
-        else
-            return mappedGenericPacks_DEPRECATED.contains(tp);
+        return env.containsMappedPack(tp);
     }
 
     TypeId clean(TypeId ty) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 644)
-        {
-            const auto& bounds = env.getMappedTypeBounds(ty);
+        const auto& bounds = env.getMappedTypeBounds(ty);
 
-            if (bounds.upperBound.empty())
-                return builtinTypes->unknownType;
+        if (bounds.upperBound.empty())
+            return builtinTypes->unknownType;
 
-            if (bounds.upperBound.size() == 1)
-                return *begin(bounds.upperBound);
+        if (bounds.upperBound.size() == 1)
+            return *begin(bounds.upperBound);
 
-            return arena->addType(IntersectionType{std::vector<TypeId>(begin(bounds.upperBound), end(bounds.upperBound))});
-        }
-        else
-        {
-            const auto& bounds = mappedGenerics_DEPRECATED[ty];
-
-            if (bounds.upperBound.empty())
-                return builtinTypes->unknownType;
-
-            if (bounds.upperBound.size() == 1)
-                return *begin(bounds.upperBound);
-
-            return arena->addType(IntersectionType{std::vector<TypeId>(begin(bounds.upperBound), end(bounds.upperBound))});
-        }
+        return arena->addType(IntersectionType{std::vector<TypeId>(begin(bounds.upperBound), end(bounds.upperBound))});
     }
 
     TypePackId clean(TypePackId tp) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 644)
-        {
-            if (auto it = env.getMappedPackBounds(tp))
-                return *it;
+        if (auto it = env.getMappedPackBounds(tp))
+            return *it;
 
-            // Clean is only called when isDirty found a pack bound
-            LUAU_ASSERT(!"Unreachable");
-            return nullptr;
-        }
-        else
-        {
-            return mappedGenericPacks_DEPRECATED[tp];
-        }
+        // Clean is only called when isDirty found a pack bound
+        LUAU_ASSERT(!"Unreachable");
+        return nullptr;
     }
 
     bool ignoreChildren(TypeId ty) override
@@ -364,7 +321,7 @@ struct ApplyMappedGenerics : Substitution
 
 std::optional<TypeId> SubtypingEnvironment::applyMappedGenerics(NotNull<BuiltinTypes> builtinTypes, NotNull<TypeArena> arena, TypeId ty)
 {
-    ApplyMappedGenerics amg{builtinTypes, arena, *this, mappedGenerics, mappedGenericPacks};
+    ApplyMappedGenerics amg{builtinTypes, arena, *this};
     return amg.substitute(ty);
 }
 
@@ -489,22 +446,12 @@ SubtypingResult Subtyping::isSubtype(TypeId subTy, TypeId superTy, NotNull<Scope
         }
 
 
-        if (DFInt::LuauTypeSolverRelease >= 644)
-        {
-            SubtypingEnvironment boundsEnv;
-            boundsEnv.parent = &env;
-            SubtypingResult boundsResult = isCovariantWith(boundsEnv, lowerBound, upperBound, scope);
-            boundsResult.reasoning.clear();
+        SubtypingEnvironment boundsEnv;
+        boundsEnv.parent = &env;
+        SubtypingResult boundsResult = isCovariantWith(boundsEnv, lowerBound, upperBound, scope);
+        boundsResult.reasoning.clear();
 
-            result.andAlso(boundsResult);
-        }
-        else
-        {
-            SubtypingResult boundsResult = isCovariantWith(env, lowerBound, upperBound, scope);
-            boundsResult.reasoning.clear();
-
-            result.andAlso(boundsResult);
-        }
+        result.andAlso(boundsResult);
     }
 
     /* TODO: We presently don't store subtype test results in the persistent
@@ -564,36 +511,30 @@ struct SeenSetPopper
 
 SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId subTy, TypeId superTy, NotNull<Scope> scope)
 {
-    std::optional<RecursionCounter> rc;
+    UnifierCounters& counters = normalizer->sharedState->counters;
+    RecursionCounter rc(&counters.recursionCount);
 
-    if (FFlag::LuauAutocompleteNewSolverLimit)
+    if (counters.recursionLimit > 0 && counters.recursionLimit < counters.recursionCount)
     {
-        UnifierCounters& counters = normalizer->sharedState->counters;
-        rc.emplace(&counters.recursionCount);
-
-        if (counters.recursionLimit > 0 && counters.recursionLimit < counters.recursionCount)
-        {
-            SubtypingResult result;
-            result.normalizationTooComplex = true;
-            return result;
-        }
+        SubtypingResult result;
+        result.normalizationTooComplex = true;
+        return result;
     }
 
     subTy = follow(subTy);
     superTy = follow(superTy);
 
-    if (const TypeId* subIt = (DFInt::LuauTypeSolverRelease >= 644 ? env.tryFindSubstitution(subTy) : env.substitutions.find(subTy)); subIt && *subIt)
+    if (const TypeId* subIt = env.tryFindSubstitution(subTy); subIt && *subIt)
         subTy = *subIt;
 
-    if (const TypeId* superIt = (DFInt::LuauTypeSolverRelease >= 644 ? env.tryFindSubstitution(superTy) : env.substitutions.find(superTy));
-        superIt && *superIt)
+    if (const TypeId* superIt = env.tryFindSubstitution(superTy); superIt && *superIt)
         superTy = *superIt;
 
     const SubtypingResult* cachedResult = resultCache.find({subTy, superTy});
     if (cachedResult)
         return *cachedResult;
 
-    cachedResult = DFInt::LuauTypeSolverRelease >= 644 ? env.tryFindSubtypingResult({subTy, superTy}) : env.ephemeralCache.find({subTy, superTy});
+    cachedResult = env.tryFindSubtypingResult({subTy, superTy});
     if (cachedResult)
         return *cachedResult;
 
@@ -838,8 +779,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypePackId
                     std::vector<TypeId> headSlice(begin(superHead), begin(superHead) + headSize);
                     TypePackId superTailPack = arena->addTypePack(std::move(headSlice), superTail);
 
-                    if (TypePackId* other =
-                            (DFInt::LuauTypeSolverRelease >= 644 ? env.getMappedPackBounds(*subTail) : env.mappedGenericPacks.find(*subTail)))
+                    if (TypePackId* other = env.getMappedPackBounds(*subTail))
                         // TODO: TypePath can't express "slice of a pack + its tail".
                         results.push_back(isCovariantWith(env, *other, superTailPack, scope).withSubComponent(TypePath::PackField::Tail));
                     else
@@ -894,8 +834,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypePackId
                     std::vector<TypeId> headSlice(begin(subHead), begin(subHead) + headSize);
                     TypePackId subTailPack = arena->addTypePack(std::move(headSlice), subTail);
 
-                    if (TypePackId* other =
-                            (DFInt::LuauTypeSolverRelease >= 644 ? env.getMappedPackBounds(*superTail) : env.mappedGenericPacks.find(*superTail)))
+                    if (TypePackId* other = env.getMappedPackBounds(*superTail))
                         // TODO: TypePath can't express "slice of a pack + its tail".
                         results.push_back(isContravariantWith(env, subTailPack, *other, scope).withSuperComponent(TypePath::PackField::Tail));
                     else
@@ -1837,11 +1776,8 @@ bool Subtyping::bindGeneric(SubtypingEnvironment& env, TypeId subTy, TypeId supe
         if (!get<GenericType>(subTy))
             return false;
 
-        if (DFInt::LuauTypeSolverRelease >= 644)
-        {
-            if (!env.mappedGenerics.find(subTy) && env.containsMappedType(subTy))
-                iceReporter->ice("attempting to modify bounds of a potentially visited generic");
-        }
+        if (!env.mappedGenerics.find(subTy) && env.containsMappedType(subTy))
+            iceReporter->ice("attempting to modify bounds of a potentially visited generic");
 
         env.mappedGenerics[subTy].upperBound.insert(superTy);
     }
@@ -1850,11 +1786,8 @@ bool Subtyping::bindGeneric(SubtypingEnvironment& env, TypeId subTy, TypeId supe
         if (!get<GenericType>(superTy))
             return false;
 
-        if (DFInt::LuauTypeSolverRelease >= 644)
-        {
-            if (!env.mappedGenerics.find(superTy) && env.containsMappedType(superTy))
-                iceReporter->ice("attempting to modify bounds of a potentially visited generic");
-        }
+        if (!env.mappedGenerics.find(superTy) && env.containsMappedType(superTy))
+            iceReporter->ice("attempting to modify bounds of a potentially visited generic");
 
         env.mappedGenerics[superTy].lowerBound.insert(subTy);
     }
@@ -1901,7 +1834,7 @@ bool Subtyping::bindGeneric(SubtypingEnvironment& env, TypePackId subTp, TypePac
     if (!get<GenericTypePack>(subTp))
         return false;
 
-    if (TypePackId* m = (DFInt::LuauTypeSolverRelease >= 644 ? env.getMappedPackBounds(subTp) : env.mappedGenericPacks.find(subTp)))
+    if (TypePackId* m = env.getMappedPackBounds(subTp))
         return *m == superTp;
 
     env.mappedGenericPacks[subTp] = superTp;

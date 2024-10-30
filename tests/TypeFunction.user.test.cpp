@@ -11,6 +11,8 @@ LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauUserDefinedTypeFunctionsSyntax2)
 LUAU_FASTFLAG(LuauUserDefinedTypeFunctions2)
 LUAU_FASTFLAG(LuauUserDefinedTypeFunctionNoEvaluation)
+LUAU_FASTFLAG(LuauUserTypeFunFixRegister)
+LUAU_FASTFLAG(LuauUserTypeFunFixNoReadWrite)
 
 TEST_SUITE_BEGIN("UserDefinedTypeFunctionTests");
 
@@ -673,6 +675,36 @@ TEST_CASE_FIXTURE(ClassFixture, "udtf_class_methods_works")
     CHECK(toString(tpm->givenTp) == "{ BaseField: number, read BaseMethod: (BaseClass, number) -> (), read Touched: Connection }");
 }
 
+TEST_CASE_FIXTURE(ClassFixture, "write_of_readonly_is_nil")
+{
+    ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
+    ScopedFastFlag udtfSyntax{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
+    ScopedFastFlag udtf{FFlag::LuauUserDefinedTypeFunctions2, true};
+    ScopedFastFlag udtfRwFix{FFlag::LuauUserTypeFunFixNoReadWrite, true};
+
+
+    CheckResult result = check(R"(
+        type function getclass(arg)
+            local props = arg:properties()
+            local table = types.newtable(props)
+            local singleton = types.singleton("BaseMethod")
+
+            if table:writeproperty(singleton) then
+                return types.singleton(true)
+            else
+                return types.singleton(false)
+            end
+        end
+        -- forcing an error here to check the exact type of the metatable
+        local function ok(idx: getclass<BaseClass>): nil return idx end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    TypePackMismatch* tpm = get<TypePackMismatch>(result.errors[0]);
+    REQUIRE(tpm);
+    CHECK(toString(tpm->givenTp) == "false");
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_check_mutability")
 {
     ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
@@ -1099,6 +1131,103 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_strip_indexer")
     TypePackMismatch* tpm = get<TypePackMismatch>(result.errors[0]);
     REQUIRE(tpm);
     CHECK(toString(tpm->givenTp) == "{ foo: string }");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "no_type_methods_on_types")
+{
+    ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
+    ScopedFastFlag udtfSyntax{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
+    ScopedFastFlag udtf{FFlag::LuauUserDefinedTypeFunctions2, true};
+    ScopedFastFlag luauUserTypeFunFixRegister{FFlag::LuauUserTypeFunFixRegister, true};
+
+    CheckResult result = check(R"(
+        type function test(x)
+            return if types.is(x, "number") then types.string else types.boolean
+        end
+        local function ok(tbl: test<number>): never return tbl end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(4, result);
+    CHECK(toString(result.errors[0]) == R"('test' type function errored at runtime: [string "test"]:3: attempt to call a nil value)");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "no_types_functions_on_type")
+{
+    ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
+    ScopedFastFlag udtfSyntax{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
+    ScopedFastFlag udtf{FFlag::LuauUserDefinedTypeFunctions2, true};
+    ScopedFastFlag luauUserTypeFunFixRegister{FFlag::LuauUserTypeFunFixRegister, true};
+
+    CheckResult result = check(R"(
+        type function test(x)
+            return x.singleton("a")
+        end
+        local function ok(tbl: test<number>): never return tbl end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(4, result);
+    CHECK(toString(result.errors[0]) == R"('test' type function errored at runtime: [string "test"]:3: attempt to call a nil value)");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "no_metatable_writes")
+{
+    ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
+    ScopedFastFlag udtfSyntax{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
+    ScopedFastFlag udtf{FFlag::LuauUserDefinedTypeFunctions2, true};
+    ScopedFastFlag luauUserTypeFunFixRegister{FFlag::LuauUserTypeFunFixRegister, true};
+
+    CheckResult result = check(R"(
+        type function test(x)
+            local a = x.__index
+            a.is = function() return false end
+            return types.singleton(x.is("number"))
+        end
+        local function ok(tbl: test<number>): never return tbl end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(4, result);
+    CHECK(toString(result.errors[0]) == R"('test' type function errored at runtime: [string "test"]:4: attempt to index nil with 'is')");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "no_eq_field")
+{
+    ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
+    ScopedFastFlag udtfSyntax{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
+    ScopedFastFlag udtf{FFlag::LuauUserDefinedTypeFunctions2, true};
+    ScopedFastFlag luauUserTypeFunFixRegister{FFlag::LuauUserTypeFunFixRegister, true};
+
+    CheckResult result = check(R"(
+        type function test(x)
+            return types.singleton(x.__eq(x, types.number))
+        end
+        local function ok(tbl: test<number>): never return tbl end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(4, result);
+    CHECK(toString(result.errors[0]) == R"('test' type function errored at runtime: [string "test"]:3: attempt to call a nil value)");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "tag_field")
+{
+    ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
+    ScopedFastFlag udtfSyntax{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
+    ScopedFastFlag udtf{FFlag::LuauUserDefinedTypeFunctions2, true};
+    ScopedFastFlag luauUserTypeFunFixRegister{FFlag::LuauUserTypeFunFixRegister, true};
+
+    CheckResult result = check(R"(
+        type function test(x)
+            return types.singleton(x.tag)
+        end
+
+        local function ok1(tbl: test<number>): never return tbl end
+        local function ok2(tbl: test<string>): never return tbl end
+        local function ok3(tbl: test<{}>): never return tbl end
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(3, result);
+    CHECK(toString(result.errors[0]) == R"(Type pack '"number"' could not be converted into 'never'; at [0], "number" is not a subtype of never)");
+    CHECK(toString(result.errors[1]) == R"(Type pack '"string"' could not be converted into 'never'; at [0], "string" is not a subtype of never)");
+    CHECK(toString(result.errors[2]) == R"(Type pack '"table"' could not be converted into 'never'; at [0], "table" is not a subtype of never)");
 }
 
 TEST_SUITE_END();

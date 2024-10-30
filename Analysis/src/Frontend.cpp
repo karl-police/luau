@@ -44,11 +44,12 @@ LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode, false)
-LUAU_FASTFLAGVARIABLE(LuauSourceModuleUpdatedWithSelectedMode, false)
 LUAU_FASTFLAGVARIABLE(LuauUserDefinedTypeFunctionNoEvaluation, false)
 LUAU_DYNAMIC_FASTFLAGVARIABLE(LuauRunCustomModuleChecks, false)
+LUAU_FASTFLAGVARIABLE(LuauMoreThoroughCycleDetection, false)
 
 LUAU_FASTFLAG(StudioReportLuauAny2)
+LUAU_FASTFLAGVARIABLE(LuauStoreDFGOnModule2, false)
 
 namespace Luau
 {
@@ -883,14 +884,18 @@ void Frontend::addBuildQueueItems(
         data.environmentScope = getModuleEnvironment(*sourceModule, data.config, frontendOptions.forAutocomplete);
         data.recordJsonLog = FFlag::DebugLuauLogSolverToJson;
 
-        Mode mode = sourceModule->mode.value_or(data.config.mode);
+        const Mode mode = sourceModule->mode.value_or(data.config.mode);
 
-        // in NoCheck mode we only need to compute the value of .cyclic for typeck
         // in the future we could replace toposort with an algorithm that can flag cyclic nodes by itself
         // however, for now getRequireCycles isn't expensive in practice on the cases we care about, and long term
         // all correct programs must be acyclic so this code triggers rarely
         if (cycleDetected)
-            data.requireCycles = getRequireCycles(fileResolver, sourceNodes, sourceNode.get(), mode == Mode::NoCheck);
+        {
+            if (FFlag::LuauMoreThoroughCycleDetection)
+                data.requireCycles = getRequireCycles(fileResolver, sourceNodes, sourceNode.get(), false);
+            else
+                data.requireCycles = getRequireCycles(fileResolver, sourceNodes, sourceNode.get(), mode == Mode::NoCheck);
+        }
 
         data.options = frontendOptions;
 
@@ -922,8 +927,7 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
     else
         mode = sourceModule.mode.value_or(config.mode);
 
-    if (FFlag::LuauSourceModuleUpdatedWithSelectedMode)
-        item.sourceModule->mode = {mode};
+    item.sourceModule->mode = {mode};
     ScopePtr environmentScope = item.environmentScope;
     double timestamp = getTimestamp();
     const std::vector<RequireCycle>& requireCycles = item.requireCycles;
@@ -1311,7 +1315,19 @@ ModulePtr check(
         }
     }
 
-    DataFlowGraph dfg = DataFlowGraphBuilder::build(sourceModule.root, iceHandler);
+    DataFlowGraph oldDfg = DataFlowGraphBuilder::build(sourceModule.root, iceHandler);
+    DataFlowGraph* dfgForConstraintGeneration = nullptr;
+    if (FFlag::LuauStoreDFGOnModule2)
+    {
+        auto [dfg, scopes] = DataFlowGraphBuilder::buildShared(sourceModule.root, iceHandler);
+        result->dataFlowGraph = std::move(dfg);
+        result->dfgScopes = std::move(scopes);
+        dfgForConstraintGeneration = result->dataFlowGraph.get();
+    }
+    else
+    {
+        dfgForConstraintGeneration = &oldDfg;
+    }
 
     UnifierSharedState unifierState{iceHandler};
     unifierState.counters.recursionLimit = FInt::LuauTypeInferRecursionLimit;
@@ -1333,7 +1349,7 @@ ModulePtr check(
         parentScope,
         std::move(prepareModuleScope),
         logger.get(),
-        NotNull{&dfg},
+        NotNull{dfgForConstraintGeneration},
         requireCycles
     };
 
@@ -1349,6 +1365,7 @@ ModulePtr check(
         moduleResolver,
         requireCycles,
         logger.get(),
+        NotNull{dfgForConstraintGeneration},
         limits
     };
 
@@ -1402,16 +1419,32 @@ ModulePtr check(
         switch (mode)
         {
         case Mode::Nonstrict:
-            Luau::checkNonStrict(
-                builtinTypes,
-                NotNull{&typeFunctionRuntime},
-                iceHandler,
-                NotNull{&unifierState},
-                NotNull{&dfg},
-                NotNull{&limits},
-                sourceModule,
-                result.get()
-            );
+            if (FFlag::LuauStoreDFGOnModule2)
+            {
+                Luau::checkNonStrict(
+                    builtinTypes,
+                    NotNull{&typeFunctionRuntime},
+                    iceHandler,
+                    NotNull{&unifierState},
+                    NotNull{dfgForConstraintGeneration},
+                    NotNull{&limits},
+                    sourceModule,
+                    result.get()
+                );
+            }
+            else
+            {
+                Luau::checkNonStrict(
+                    builtinTypes,
+                    NotNull{&typeFunctionRuntime},
+                    iceHandler,
+                    NotNull{&unifierState},
+                    NotNull{&oldDfg},
+                    NotNull{&limits},
+                    sourceModule,
+                    result.get()
+                );
+            }
             break;
         case Mode::Definition:
             // fallthrough intentional
