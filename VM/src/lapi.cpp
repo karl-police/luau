@@ -39,8 +39,8 @@ const char* lua_ident = "$Lua: Lua 5.1.4 Copyright (C) 1994-2008 Lua.org, PUC-Ri
                         "$Authors: R. Ierusalimschy, L. H. de Figueiredo & W. Celes $\n"
                         "$URL: www.lua.org $\n";
 
-const char* luau_ident = "$Luau: Copyright (C) 2019-2023 Roblox Corporation $\n"
-                         "$URL: luau-lang.org $\n";
+const char* luau_ident = "$Luau: Copyright (C) 2019-2024 Roblox Corporation $\n"
+                         "$URL: luau.org $\n";
 
 #define api_checknelems(L, n) api_check(L, (n) <= (L->top - L->base))
 
@@ -1278,6 +1278,26 @@ void* lua_newuserdatatagged(lua_State* L, size_t sz, int tag)
     luaC_checkGC(L);
     luaC_threadbarrier(L);
     Udata* u = luaU_newudata(L, sz, tag);
+    setuvalue(L, L->top, u);
+    api_incr_top(L);
+    return u->data;
+}
+
+void* lua_newuserdatataggedwithmetatable(lua_State* L, size_t sz, int tag)
+{
+    api_check(L, unsigned(tag) < LUA_UTAG_LIMIT);
+    luaC_checkGC(L);
+    luaC_threadbarrier(L);
+    Udata* u = luaU_newudata(L, sz, tag);
+
+    // currently, we always allocate unmarked objects, so forward barrier can be skipped
+    LUAU_ASSERT(!isblack(obj2gco(u)));
+
+    Table* h = L->global->udatamt[tag];
+    api_check(L, h != nullptr);
+
+    u->metatable = h;
+
     setuvalue(L, L->top, u);
     api_incr_top(L);
     return u->data;

@@ -38,7 +38,7 @@ LUAU_FASTFLAG(LuauSolverV2)
  * 3: Suffix free/generic types with their scope pointer, if present.
  */
 LUAU_FASTINTVARIABLE(DebugLuauVerboseTypeNames, 0)
-LUAU_FASTFLAGVARIABLE(DebugLuauToStringNoLexicalSort, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauToStringNoLexicalSort)
 
 namespace Luau
 {
@@ -870,6 +870,8 @@ struct TypeStringifier
             return;
         }
 
+        LUAU_ASSERT(uv.options.size() > 1);
+
         bool optional = false;
         bool hasNonNilDisjunct = false;
 
@@ -878,7 +880,7 @@ struct TypeStringifier
         {
             el = follow(el);
 
-            if (isNil(el))
+            if (state.opts.useQuestionMarks && isNil(el))
             {
                 optional = true;
                 continue;

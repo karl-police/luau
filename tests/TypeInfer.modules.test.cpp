@@ -11,8 +11,10 @@
 #include "doctest.h"
 
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
+LUAU_FASTFLAG(LuauRequireCyclesDontAlwaysReturnAny)
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(LuauTypestateBuiltins)
+LUAU_FASTFLAG(LuauTypestateBuiltins2)
+LUAU_FASTFLAG(LuauNewSolverPopulateTableLocations)
 
 using namespace Luau;
 
@@ -184,7 +186,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "cross_module_table_freeze")
     ModulePtr b = frontend.moduleResolver.getModule("game/B");
     REQUIRE(b != nullptr);
     // confirm that no cross-module mutation happened here!
-    if (FFlag::LuauSolverV2 && FFlag::LuauTypestateBuiltins)
+    if (FFlag::LuauSolverV2 && FFlag::LuauTypestateBuiltins2)
         CHECK(toString(b->returnType) == "{ read a: number }");
     else if (FFlag::LuauSolverV2)
         CHECK(toString(b->returnType) == "{ a: number }");
@@ -465,7 +467,15 @@ local b: B.T = a
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
     if (FFlag::LuauSolverV2)
-        CHECK(toString(result.errors.at(0)) == "Type 'T' could not be converted into 'T'; at [read \"x\"], number is not exactly string");
+    {
+        if (FFlag::LuauNewSolverPopulateTableLocations)
+            CHECK(
+                toString(result.errors.at(0)) ==
+                "Type 'T' from 'game/A' could not be converted into 'T' from 'game/B'; at [read \"x\"], number is not exactly string"
+            );
+        else
+            CHECK(toString(result.errors.at(0)) == "Type 'T' could not be converted into 'T'; at [read \"x\"], number is not exactly string");
+    }
     else
     {
         const std::string expected = R"(Type 'T' from 'game/A' could not be converted into 'T' from 'game/B'
@@ -506,7 +516,15 @@ local b: B.T = a
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
     if (FFlag::LuauSolverV2)
-        CHECK(toString(result.errors.at(0)) == "Type 'T' could not be converted into 'T'; at [read \"x\"], number is not exactly string");
+    {
+        if (FFlag::LuauNewSolverPopulateTableLocations)
+            CHECK(
+                toString(result.errors.at(0)) ==
+                "Type 'T' from 'game/B' could not be converted into 'T' from 'game/C'; at [read \"x\"], number is not exactly string"
+            );
+        else
+            CHECK(toString(result.errors.at(0)) == "Type 'T' could not be converted into 'T'; at [read \"x\"], number is not exactly string");
+    }
     else
     {
         const std::string expected = R"(Type 'T' from 'game/B' could not be converted into 'T' from 'game/C'
@@ -604,7 +622,7 @@ function createUpdater(renderer)
     function updater.enqueueForceUpdate(publicInstance, callback, _callerName)
         updater._renderer.render(
             updater._renderer,
-            updater._renderer._element, 
+            updater._renderer._element,
             updater._renderer._context
         )
     end
@@ -617,7 +635,7 @@ function createUpdater(renderer)
     )
         updater._renderer.render(
             updater._renderer,
-            updater._renderer._element, 
+            updater._renderer._element,
             updater._renderer._context
         )
     end
@@ -626,7 +644,7 @@ function createUpdater(renderer)
         local currentState = updater._renderer._newState or publicInstance.state
         updater._renderer.render(
             updater._renderer,
-            updater._renderer._element, 
+            updater._renderer._element,
             updater._renderer._context
         )
     end
@@ -734,6 +752,47 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "spooky_blocked_type_laundered_by_bound_type"
     LUAU_REQUIRE_NO_ERRORS(check(R"(
         local _ = require(game.A);
     )"));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "cycles_dont_make_everything_any")
+{
+    ScopedFastFlag sff{FFlag::LuauRequireCyclesDontAlwaysReturnAny, true};
+
+    fileResolver.source["game/A"] = R"(
+        --!strict
+        local module = {}
+
+        function module.foo()
+            return 2
+        end
+
+        function module.bar()
+            local m = require(game.B)
+            return m.foo() + 1
+        end
+
+        return module
+    )";
+
+    fileResolver.source["game/B"] = R"(
+        --!strict
+        local module = {}
+
+        function module.foo()
+            return 2
+        end
+
+        function module.bar()
+            local m = require(game.A)
+            return m.foo() + 1
+        end
+
+        return module
+    )";
+
+    frontend.check("game/A");
+
+    CHECK("module" == toString(frontend.moduleResolver.getModule("game/B")->returnType));
 }
 
 TEST_SUITE_END();
