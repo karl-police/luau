@@ -28,12 +28,14 @@
 #include <utility>
 
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverMoreDetails, false); // CUSTOM-1
-LUAU_FASTFLAGVARIABLE(DebugLuauLogSolver, false)
-LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverIncludeDependencies, false)
-LUAU_FASTFLAGVARIABLE(DebugLuauLogBindings, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolver)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverIncludeDependencies)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogBindings)
 LUAU_FASTINTVARIABLE(LuauSolverRecursionLimit, 500)
 LUAU_DYNAMIC_FASTINT(LuauTypeSolverRelease)
-LUAU_FASTFLAGVARIABLE(LuauRemoveNotAnyHack, false)
+LUAU_FASTFLAGVARIABLE(LuauRemoveNotAnyHack)
+LUAU_FASTFLAGVARIABLE(DebugLuauEqSatSimplification)
+LUAU_FASTFLAG(LuauNewSolverPopulateTableLocations)
 
 namespace Luau
 {
@@ -612,6 +614,7 @@ struct InstantiationQueuer : TypeOnceVisitor
 
 ConstraintSolver::ConstraintSolver(
     NotNull<Normalizer> normalizer,
+    NotNull<Simplifier> simplifier,
     NotNull<TypeFunctionRuntime> typeFunctionRuntime,
     NotNull<Scope> rootScope,
     std::vector<NotNull<Constraint>> constraints,
@@ -625,6 +628,7 @@ ConstraintSolver::ConstraintSolver(
     : arena(normalizer->arena)
     , builtinTypes(normalizer->builtinTypes)
     , normalizer(normalizer)
+    , simplifier(simplifier)
     , typeFunctionRuntime(typeFunctionRuntime)
     , constraints(std::move(constraints))
     , rootScope(rootScope)
@@ -1427,9 +1431,15 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
             target = follow(instantiated);
         }
 
+        if (FFlag::LuauNewSolverPopulateTableLocations)
+        {
+            // This is a new type - redefine the location.
+            ttv->definitionLocation = constraint->location;
+            ttv->definitionModuleName = currentModuleName;
+        }
+
         ttv->instantiatedTypeParams = typeArguments;
         ttv->instantiatedTypePackParams = packArguments;
-        // TODO: Fill in definitionModuleName.
     }
 
     bindResult(target);
@@ -1655,7 +1665,7 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
     {
         // This is expensive as we need to traverse a (potentially large)
         // literal up front in order to determine if there are any blocked
-        // types, otherwise we may run `matchTypeLiteral` multiple times, 
+        // types, otherwise we may run `matchTypeLiteral` multiple times,
         // which right now may fail due to being non-idempotent (it
         // destructively updates the underlying literal type).
         auto blockedTypes = findBlockedArgTypesIn(c.callSite, c.astTypes);
@@ -1751,7 +1761,8 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
                 }
             }
         }
-        else if (expr->is<AstExprConstantBool>() || expr->is<AstExprConstantString>() || expr->is<AstExprConstantNumber>() || expr->is<AstExprConstantNil>())
+        else if (expr->is<AstExprConstantBool>() || expr->is<AstExprConstantString>() || expr->is<AstExprConstantNumber>() ||
+                 expr->is<AstExprConstantNil>())
         {
             Unifier2 u2{arena, builtinTypes, constraint->scope, NotNull{&iceReporter}};
             u2.unify(actualArgTy, expectedArgTy);
@@ -2125,7 +2136,7 @@ bool ConstraintSolver::tryDispatch(const AssignPropConstraint& c, NotNull<const 
             upperTable->props[c.propName] = rhsType;
 
             // Food for thought: Could we block if simplification encounters a blocked type?
-            lhsFree->upperBound = simplifyIntersection(builtinTypes, arena, lhsFreeUpperBound, newUpperBound).result;
+            lhsFree->upperBound = simplifyIntersection(constraint->scope, constraint->location, lhsFreeUpperBound, newUpperBound);
 
             bind(constraint, c.propType, rhsType);
             return true;
@@ -2339,7 +2350,7 @@ bool ConstraintSolver::tryDispatch(const AssignIndexConstraint& c, NotNull<const
             }
         }
 
-        TypeId res = simplifyIntersection(builtinTypes, arena, std::move(parts)).result;
+        TypeId res = simplifyIntersection(constraint->scope, constraint->location, std::move(parts));
 
         unify(constraint, rhsType, res);
     }
@@ -2657,12 +2668,7 @@ bool ConstraintSolver::tryDispatchIterableTable(TypeId iteratorTy, const Iterabl
     return true;
 }
 
-bool ConstraintSolver::tryDispatchIterableFunction(
-    TypeId nextTy,
-    TypeId tableTy,
-    const IterableConstraint& c,
-    NotNull<const Constraint> constraint
-)
+bool ConstraintSolver::tryDispatchIterableFunction(TypeId nextTy, TypeId tableTy, const IterableConstraint& c, NotNull<const Constraint> constraint)
 {
     const FunctionType* nextFn = get<FunctionType>(nextTy);
     // If this does not hold, we should've never called `tryDispatchIterableFunction` in the first place.
@@ -2924,9 +2930,9 @@ std::pair<std::vector<TypeId>, std::optional<TypeId>> ConstraintSolver::lookupTa
 
             // if we're in an lvalue context, we need the _common_ type here.
             if (context == ValueContext::LValue)
-                return {{}, simplifyIntersection(builtinTypes, arena, one, two).result};
+                return {{}, simplifyIntersection(constraint->scope, constraint->location, one, two)};
 
-            return {{}, simplifyUnion(builtinTypes, arena, one, two).result};
+            return {{}, simplifyUnion(constraint->scope, constraint->location, one, two)};
         }
         // if we're in an lvalue context, we need the _common_ type here.
         else if (context == ValueContext::LValue)
@@ -2958,7 +2964,7 @@ std::pair<std::vector<TypeId>, std::optional<TypeId>> ConstraintSolver::lookupTa
         {
             TypeId one = *begin(options);
             TypeId two = *(++begin(options));
-            return {{}, simplifyIntersection(builtinTypes, arena, one, two).result};
+            return {{}, simplifyIntersection(constraint->scope, constraint->location, one, two)};
         }
         else
             return {{}, arena->addType(IntersectionType{std::vector<TypeId>(begin(options), end(options))})};
@@ -3402,6 +3408,63 @@ bool ConstraintSolver::hasUnresolvedConstraints(TypeId ty)
         return *refCount > 0;
 
     return false;
+}
+
+TypeId ConstraintSolver::simplifyIntersection(NotNull<Scope> scope, Location location, TypeId left, TypeId right)
+{
+    if (FFlag::DebugLuauEqSatSimplification)
+    {
+        TypeId ty = arena->addType(IntersectionType{{left, right}});
+
+        std::optional<EqSatSimplificationResult> res = eqSatSimplify(simplifier, ty);
+        if (!res)
+            return ty;
+
+        for (TypeId ty : res->newTypeFunctions)
+            pushConstraint(scope, location, ReduceConstraint{ty});
+
+        return res->result;
+    }
+    else
+        return ::Luau::simplifyIntersection(builtinTypes, arena, left, right).result;
+}
+
+TypeId ConstraintSolver::simplifyIntersection(NotNull<Scope> scope, Location location, std::set<TypeId> parts)
+{
+    if (FFlag::DebugLuauEqSatSimplification)
+    {
+        TypeId ty = arena->addType(IntersectionType{std::vector(parts.begin(), parts.end())});
+
+        std::optional<EqSatSimplificationResult> res = eqSatSimplify(simplifier, ty);
+        if (!res)
+            return ty;
+
+        for (TypeId ty : res->newTypeFunctions)
+            pushConstraint(scope, location, ReduceConstraint{ty});
+
+        return res->result;
+    }
+    else
+        return ::Luau::simplifyIntersection(builtinTypes, arena, std::move(parts)).result;
+}
+
+TypeId ConstraintSolver::simplifyUnion(NotNull<Scope> scope, Location location, TypeId left, TypeId right)
+{
+    if (FFlag::DebugLuauEqSatSimplification)
+    {
+        TypeId ty = arena->addType(UnionType{{left, right}});
+
+        std::optional<EqSatSimplificationResult> res = eqSatSimplify(simplifier, ty);
+        if (!res)
+            return ty;
+
+        for (TypeId ty : res->newTypeFunctions)
+            pushConstraint(scope, location, ReduceConstraint{ty});
+
+        return res->result;
+    }
+    else
+        return ::Luau::simplifyUnion(builtinTypes, arena, left, right).result;
 }
 
 TypeId ConstraintSolver::errorRecoveryType() const

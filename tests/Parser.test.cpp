@@ -18,6 +18,7 @@ LUAU_FASTINT(LuauParseErrorLimit)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauAttributeSyntaxFunExpr)
 LUAU_FASTFLAG(LuauUserDefinedTypeFunctionsSyntax2)
+LUAU_FASTFLAG(LuauUserDefinedTypeFunParseExport)
 
 namespace
 {
@@ -1191,9 +1192,7 @@ until false
 
 TEST_CASE_FIXTURE(Fixture, "parse_nesting_based_end_detection_local_function")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauSolverV2, false},
-    };
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     try
     {
@@ -1228,9 +1227,7 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "parse_nesting_based_end_detection_failsafe_earlier")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauSolverV2, false},
-    };
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     try
     {
@@ -2381,10 +2378,15 @@ TEST_CASE_FIXTURE(Fixture, "invalid_type_forms")
 TEST_CASE_FIXTURE(Fixture, "parse_user_defined_type_functions")
 {
     ScopedFastFlag sff{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
+    ScopedFastFlag sff2{FFlag::LuauUserDefinedTypeFunParseExport, true};
 
     AstStat* stat = parse(R"(
         type function foo()
-            return
+            return types.number
+        end
+
+        export type function bar()
+            return types.string
         end
     )");
 
@@ -2421,7 +2423,6 @@ TEST_CASE_FIXTURE(Fixture, "invalid_user_defined_type_functions")
 {
     ScopedFastFlag sff{FFlag::LuauUserDefinedTypeFunctionsSyntax2, true};
 
-    matchParseError("export type function foo() end", "Type function cannot be exported");
     matchParseError("local foo = 1; type function bar() print(foo) end", "Type function cannot reference outer local 'foo'");
     matchParseError("type function foo() local v1 = 1; type function bar() print(v1) end end", "Type function cannot reference outer local 'v1'");
 }
@@ -2628,9 +2629,7 @@ TEST_CASE_FIXTURE(Fixture, "recovery_of_parenthesized_expressions")
         }
     };
 
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauSolverV2, false},
-    };
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     checkRecovery("function foo(a, b. c) return a + b end", "function foo(a, b) return a + b end", 1);
     checkRecovery(
@@ -2872,9 +2871,7 @@ TEST_CASE_FIXTURE(Fixture, "AstName_comparison")
 
 TEST_CASE_FIXTURE(Fixture, "generic_type_list_recovery")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauSolverV2, false},
-    };
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
 
     try
     {
