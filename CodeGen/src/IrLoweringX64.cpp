@@ -15,6 +15,10 @@
 #include "lstate.h"
 #include "lgc.h"
 
+LUAU_FASTFLAG(LuauVectorLibNativeDot)
+LUAU_FASTFLAG(LuauCodeGenVectorDeadStoreElim)
+LUAU_FASTFLAG(LuauCodeGenLerp)
+
 namespace Luau
 {
 namespace CodeGen
@@ -295,6 +299,9 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         storeDoubleAsFloat(luauRegValueVector(vmRegOp(inst.a), 0), inst.b);
         storeDoubleAsFloat(luauRegValueVector(vmRegOp(inst.a), 1), inst.c);
         storeDoubleAsFloat(luauRegValueVector(vmRegOp(inst.a), 2), inst.d);
+
+        if (FFlag::LuauCodeGenVectorDeadStoreElim && inst.e.kind != IrOpKind::None)
+            build.mov(luauRegTag(vmRegOp(inst.a)), tagOp(inst.e));
         break;
     case IrCmd::STORE_TVALUE:
     {
@@ -616,6 +623,30 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         build.vblendvpd(inst.regX64, tmp1.reg, build.f64x2(1, 1), inst.regX64);
         break;
     }
+    case IrCmd::SELECT_NUM:
+    {
+        LUAU_ASSERT(FFlag::LuauCodeGenLerp);
+        inst.regX64 = regs.allocRegOrReuse(SizeX64::xmmword, index, {inst.a, inst.c, inst.d}); // can't reuse b if a is a memory operand
+
+        ScopedRegX64 tmp{regs, SizeX64::xmmword};
+
+        if (inst.c.kind == IrOpKind::Inst)
+            build.vcmpeqsd(tmp.reg, regOp(inst.c), memRegDoubleOp(inst.d));
+        else
+        {
+            build.vmovsd(tmp.reg, memRegDoubleOp(inst.c));
+            build.vcmpeqsd(tmp.reg, tmp.reg, memRegDoubleOp(inst.d));
+        }
+
+        if (inst.a.kind == IrOpKind::Inst)
+            build.vblendvpd(inst.regX64, regOp(inst.a), memRegDoubleOp(inst.b), tmp.reg);
+        else
+        {
+            build.vmovsd(inst.regX64, memRegDoubleOp(inst.a));
+            build.vblendvpd(inst.regX64, inst.regX64, memRegDoubleOp(inst.b), tmp.reg);
+        }
+        break;
+    }
     case IrCmd::ADD_VEC:
     {
         inst.regX64 = regs.allocRegOrReuse(SizeX64::xmmword, index, {inst.a, inst.b});
@@ -677,6 +708,8 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::DOT_VEC:
     {
+        LUAU_ASSERT(FFlag::LuauVectorLibNativeDot);
+
         inst.regX64 = regs.allocRegOrReuse(SizeX64::xmmword, index, {inst.a, inst.b});
 
         ScopedRegX64 tmp1{regs};

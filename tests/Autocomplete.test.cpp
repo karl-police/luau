@@ -2469,7 +2469,7 @@ local ec = e(f@5)
 TEST_CASE_FIXTURE(ACFixture, "type_correct_suggestion_for_overloads")
 {
     if (FFlag::LuauSolverV2) // CLI-116814 Autocomplete needs to populate expected types for function arguments correctly
-                                                      // (overloads and singletons)
+                             // (overloads and singletons)
         return;
     check(R"(
 local target: ((number) -> string) & ((string) -> number))
@@ -2819,7 +2819,7 @@ end
 TEST_CASE_FIXTURE(ACFixture, "suggest_table_keys")
 {
     if (FFlag::LuauSolverV2) // CLI-116812 AutocompleteTest.suggest_table_keys needs to populate expected types for nested
-                                                      // tables without an annotation
+                             // tables without an annotation
         return;
 
     check(R"(
@@ -3306,7 +3306,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "autocomplete_on_string_singletons")
 TEST_CASE_FIXTURE(ACFixture, "autocomplete_string_singletons")
 {
     if (FFlag::LuauSolverV2) // CLI-116814 Autocomplete needs to populate expected types for function arguments correctly
-                                                      // (overloads and singletons)
+                             // (overloads and singletons)
         return;
 
     check(R"(
@@ -4539,8 +4539,7 @@ end
 foo(@1)
     )");
 
-    const std::optional<std::string> EXPECTED_INSERT =
-        FFlag::LuauSolverV2 ? "function(...: number): number  end" : "function(...): number  end";
+    const std::optional<std::string> EXPECTED_INSERT = FFlag::LuauSolverV2 ? "function(...: number): number  end" : "function(...): number  end";
 
     auto ac = autocomplete('1');
 

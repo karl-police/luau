@@ -84,7 +84,6 @@ struct DfgScope
 
     DfgScope* parent;
     ScopeType scopeType;
-    Location location;
 
     using Bindings = DenseHashMap<Symbol, const Def*>;
     using Props = DenseHashMap<const Def*, std::unordered_map<std::string, const Def*>>;
@@ -126,25 +125,6 @@ struct DataFlowGraphBuilder
         NotNull<InternalErrorReporter> handle
     );
 
-    /**
-     * Takes a stale graph along with a list of scopes, a small fragment of the ast, and a cursor position
-     * and constructs the DataFlowGraph for just that fragment. This method will fabricate defs in the final
-     * DFG for things that have been referenced and exist in the stale dfg.
-     * For example, the fragment local z = x + y will populate defs for x and y from the stale graph.
-     * @param staleGraph - the old DFG
-     * @param scopes - the old DfgScopes in the graph
-     * @param fragment - the Ast Fragment to re-build the root for
-     * @param cursorPos - the current location of the cursor - used to determine which scope we are currently in
-     * @param handle - for internal compiler errors
-     */
-    static DataFlowGraph updateGraph(
-        const DataFlowGraph& staleGraph,
-        const std::vector<std::unique_ptr<DfgScope>>& scopes,
-        AstStatBlock* fragment,
-        const Position& cursorPos,
-        NotNull<InternalErrorReporter> handle
-    );
-
 private:
     DataFlowGraphBuilder() = default;
 
@@ -175,7 +155,7 @@ private:
     DenseHashMap<Symbol, FunctionCapture> captures{Symbol{}};
     void resolveCaptures();
 
-    DfgScope* makeChildScope(Location loc, DfgScope::ScopeType scopeType = DfgScope::Linear);
+    DfgScope* makeChildScope(DfgScope::ScopeType scopeType = DfgScope::Linear);
 
     void join(DfgScope* p, DfgScope* a, DfgScope* b);
     void joinBindings(DfgScope* p, const DfgScope& a, const DfgScope& b);

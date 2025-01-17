@@ -1809,7 +1809,8 @@ NormalizationResult Normalizer::unionNormalWithTy(
     }
     else if (get<UnknownType>(here.tops))
         return NormalizationResult::True;
-    else if (get<GenericType>(there) || get<FreeType>(there) || get<BlockedType>(there) || get<PendingExpansionType>(there) || get<TypeFunctionInstanceType>(there))
+    else if (get<GenericType>(there) || get<FreeType>(there) || get<BlockedType>(there) || get<PendingExpansionType>(there) ||
+             get<TypeFunctionInstanceType>(there))
     {
         if (tyvarIndex(there) <= ignoreSmallerTyvars)
             return NormalizationResult::True;
@@ -3162,7 +3163,8 @@ NormalizationResult Normalizer::intersectNormalWithTy(
         }
         return NormalizationResult::True;
     }
-    else if (get<GenericType>(there) || get<FreeType>(there) || get<BlockedType>(there) || get<PendingExpansionType>(there) || get<TypeFunctionInstanceType>(there))
+    else if (get<GenericType>(there) || get<FreeType>(there) || get<BlockedType>(there) || get<PendingExpansionType>(there) ||
+             get<TypeFunctionInstanceType>(there))
     {
         NormalizedType thereNorm{builtinTypes};
         NormalizedType topNorm{builtinTypes};
@@ -3465,7 +3467,14 @@ TypeId Normalizer::typeFromNormal(const NormalizedType& norm)
         return arena->addType(UnionType{std::move(result)});
 }
 
-bool isSubtype(TypeId subTy, TypeId superTy, NotNull<Scope> scope, NotNull<BuiltinTypes> builtinTypes, InternalErrorReporter& ice)
+bool isSubtype(
+    TypeId subTy,
+    TypeId superTy,
+    NotNull<Scope> scope,
+    NotNull<BuiltinTypes> builtinTypes,
+    NotNull<Simplifier> simplifier,
+    InternalErrorReporter& ice
+)
 {
     UnifierSharedState sharedState{&ice};
     TypeArena arena;
@@ -3478,7 +3487,7 @@ bool isSubtype(TypeId subTy, TypeId superTy, NotNull<Scope> scope, NotNull<Built
     // Subtyping under DCR is not implemented using unification!
     if (FFlag::LuauSolverV2)
     {
-        Subtyping subtyping{builtinTypes, NotNull{&arena}, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&ice}};
+        Subtyping subtyping{builtinTypes, NotNull{&arena}, simplifier, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&ice}};
 
         return subtyping.isSubtype(subTy, superTy, scope).isSubtype;
     }
@@ -3491,7 +3500,14 @@ bool isSubtype(TypeId subTy, TypeId superTy, NotNull<Scope> scope, NotNull<Built
     }
 }
 
-bool isSubtype(TypePackId subPack, TypePackId superPack, NotNull<Scope> scope, NotNull<BuiltinTypes> builtinTypes, InternalErrorReporter& ice)
+bool isSubtype(
+    TypePackId subPack,
+    TypePackId superPack,
+    NotNull<Scope> scope,
+    NotNull<BuiltinTypes> builtinTypes,
+    NotNull<Simplifier> simplifier,
+    InternalErrorReporter& ice
+)
 {
     UnifierSharedState sharedState{&ice};
     TypeArena arena;
@@ -3504,7 +3520,7 @@ bool isSubtype(TypePackId subPack, TypePackId superPack, NotNull<Scope> scope, N
     // Subtyping under DCR is not implemented using unification!
     if (FFlag::LuauSolverV2)
     {
-        Subtyping subtyping{builtinTypes, NotNull{&arena}, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&ice}};
+        Subtyping subtyping{builtinTypes, NotNull{&arena}, simplifier, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&ice}};
 
         return subtyping.isSubtype(subPack, superPack, scope).isSubtype;
     }

@@ -9,13 +9,15 @@
 #include "Luau/TypePack.h"
 #include "Luau/VisitType.h"
 
-LUAU_DYNAMIC_FASTINT(LuauTypeSolverRelease)
+LUAU_FASTFLAG(LuauAutocompleteRefactorsForIncrementalAutocomplete)
+LUAU_FASTFLAGVARIABLE(LuauGeneralizationRemoveRecursiveUpperBound)
 
 namespace Luau
 {
 
 struct MutatingGeneralizer : TypeOnceVisitor
 {
+    NotNull<TypeArena> arena;
     NotNull<BuiltinTypes> builtinTypes;
 
     NotNull<Scope> scope;
@@ -29,6 +31,7 @@ struct MutatingGeneralizer : TypeOnceVisitor
     bool avoidSealingTables = false;
 
     MutatingGeneralizer(
+        NotNull<TypeArena> arena,
         NotNull<BuiltinTypes> builtinTypes,
         NotNull<Scope> scope,
         NotNull<DenseHashSet<TypeId>> cachedTypes,
@@ -37,6 +40,7 @@ struct MutatingGeneralizer : TypeOnceVisitor
         bool avoidSealingTables
     )
         : TypeOnceVisitor(/* skipBoundTypes */ true)
+        , arena(arena)
         , builtinTypes(builtinTypes)
         , scope(scope)
         , cachedTypes(cachedTypes)
@@ -229,6 +233,53 @@ struct MutatingGeneralizer : TypeOnceVisitor
         else
         {
             TypeId ub = follow(ft->upperBound);
+            if (FFlag::LuauGeneralizationRemoveRecursiveUpperBound)
+            {
+
+                // If the upper bound is a union type or an intersection type,
+                // and one of it's members is the free type we're
+                // generalizing, don't include it in the upper bound. For a
+                // free type such as:
+                //
+                //  t1 where t1 = D <: 'a <: (A | B | C | t1)
+                //
+                // Naively replacing it with it's upper bound creates:
+                //
+                //  t1 where t1 = A | B | C | t1
+                //
+                // It makes sense to just optimize this and exclude the
+                // recursive component by semantic subtyping rules.
+
+                if (auto itv = get<IntersectionType>(ub))
+                {
+                    std::vector<TypeId> newIds;
+                    newIds.reserve(itv->parts.size());
+                    for (auto part : itv)
+                    {
+                        if (part != ty)
+                            newIds.push_back(part);
+                    }
+                    if (newIds.size() == 1)
+                        ub = newIds[0];
+                    else if (newIds.size() > 0)
+                        ub = arena->addType(IntersectionType{std::move(newIds)});
+                }
+                else if (auto utv = get<UnionType>(ub))
+                {
+                    std::vector<TypeId> newIds;
+                    newIds.reserve(utv->options.size());
+                    for (auto part : utv)
+                    {
+                        if (part != ty)
+                            newIds.push_back(part);
+                    }
+                    if (newIds.size() == 1)
+                        ub = newIds[0];
+                    else if (newIds.size() > 0)
+                        ub = arena->addType(UnionType{std::move(newIds)});
+                }
+            }
+
             if (FreeType* upperFree = getMutable<FreeType>(ub); upperFree && upperFree->lowerBound == ty)
                 upperFree->lowerBound = builtinTypes->neverType;
             else
@@ -447,7 +498,7 @@ struct FreeTypeSearcher : TypeVisitor
                 traverse(*prop.readTy);
             else
             {
-                LUAU_ASSERT(prop.isShared());
+                LUAU_ASSERT(prop.isShared() || FFlag::LuauAutocompleteRefactorsForIncrementalAutocomplete);
 
                 Polarity p = polarity;
                 polarity = Both;
@@ -528,12 +579,7 @@ struct TypeCacher : TypeOnceVisitor
     DenseHashSet<TypePackId> uncacheablePacks{nullptr};
 
     explicit TypeCacher(NotNull<DenseHashSet<TypeId>> cachedTypes)
-        // CLI-120975: once we roll out release 646, we _want_ to visit bound
-        // types to ensure they're marked as uncacheable if the types they are
-        // bound to are also uncacheable. Hence: if LuauTypeSolverRelease is
-        // less than 646, skip bound types (the prior behavior). Otherwise, 
-        // do not skip bound types.
-        : TypeOnceVisitor(/* skipBoundTypes */ DFInt::LuauTypeSolverRelease < 646)
+        : TypeOnceVisitor(/* skipBoundTypes */ false)
         , cachedTypes(cachedTypes)
     {
     }
@@ -570,33 +616,19 @@ struct TypeCacher : TypeOnceVisitor
 
     bool visit(TypeId ty) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 646)
-        {
-            // NOTE: `TypeCacher` should explicitly visit _all_ types and type packs,
-            // otherwise it's prone to marking types that cannot be cached as
-            // cacheable.
-            LUAU_ASSERT(false);
-            LUAU_UNREACHABLE();
-        }
-        else
-        {
-            return true;
-        }
+        // NOTE: `TypeCacher` should explicitly visit _all_ types and type packs,
+        // otherwise it's prone to marking types that cannot be cached as
+        // cacheable.
+        LUAU_ASSERT(false);
+        LUAU_UNREACHABLE();
     }
 
     bool visit(TypeId ty, const BoundType& btv) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 646)
-        {
-            traverse(btv.boundTo);
-            if (isUncacheable(btv.boundTo))
-                markUncacheable(ty);
-            return false;
-        }
-        else
-        {
-            return true;
-        }
+        traverse(btv.boundTo);
+        if (isUncacheable(btv.boundTo))
+            markUncacheable(ty);
+        return false;
     }
 
     bool visit(TypeId ty, const FreeType& ft) override
@@ -623,15 +655,8 @@ struct TypeCacher : TypeOnceVisitor
 
     bool visit(TypeId ty, const ErrorType&) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 646)
-        {
-            cache(ty);
-            return false;
-        }
-        else
-        {
-            return true;
-        }
+        cache(ty);
+        return false;
     }
 
     bool visit(TypeId ty, const PrimitiveType&) override
@@ -773,20 +798,13 @@ struct TypeCacher : TypeOnceVisitor
 
     bool visit(TypeId ty, const MetatableType& mtv) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 646)
-        {
-            traverse(mtv.table);
-            traverse(mtv.metatable);
-            if (isUncacheable(mtv.table) || isUncacheable(mtv.metatable))
-                markUncacheable(ty);
-            else
-                cache(ty);
-            return false;
-        }
+        traverse(mtv.table);
+        traverse(mtv.metatable);
+        if (isUncacheable(mtv.table) || isUncacheable(mtv.metatable))
+            markUncacheable(ty);
         else
-        {
-            return true;
-        }
+            cache(ty);
+        return false;
     }
 
     bool visit(TypeId ty, const ClassType&) override
@@ -911,18 +929,11 @@ struct TypeCacher : TypeOnceVisitor
 
     bool visit(TypePackId tp) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 646)
-        {
-            // NOTE: `TypeCacher` should explicitly visit _all_ types and type packs,
-            // otherwise it's prone to marking types that cannot be cached as
-            // cacheable, which will segfault down the line.
-            LUAU_ASSERT(false);
-            LUAU_UNREACHABLE();
-        }
-        else
-        {
-            return true;
-        }
+        // NOTE: `TypeCacher` should explicitly visit _all_ types and type packs,
+        // otherwise it's prone to marking types that cannot be cached as
+        // cacheable, which will segfault down the line.
+        LUAU_ASSERT(false);
+        LUAU_UNREACHABLE();
     }
 
     bool visit(TypePackId tp, const FreeTypePack&) override
@@ -936,7 +947,7 @@ struct TypeCacher : TypeOnceVisitor
         return true;
     }
 
-    bool visit(TypePackId tp, const Unifiable::Error& etp) override
+    bool visit(TypePackId tp, const ErrorTypePack& etp) override
     {
         return true;
     }
@@ -966,36 +977,30 @@ struct TypeCacher : TypeOnceVisitor
         return false;
     }
 
-    bool visit(TypePackId tp, const BoundTypePack& btp) override {
-        if (DFInt::LuauTypeSolverRelease >= 645) {
-            traverse(btp.boundTo);
-            if (isUncacheable(btp.boundTo))
-                markUncacheable(tp);
-            return false;
-        }
-        return true;
+    bool visit(TypePackId tp, const BoundTypePack& btp) override
+    {
+        traverse(btp.boundTo);
+        if (isUncacheable(btp.boundTo))
+            markUncacheable(tp);
+        return false;
     }
 
     bool visit(TypePackId tp, const TypePack& typ) override
     {
-        if (DFInt::LuauTypeSolverRelease >= 646)
+        bool uncacheable = false;
+        for (TypeId ty : typ.head)
         {
-            bool uncacheable = false;
-            for (TypeId ty : typ.head)
-            {
-                traverse(ty);
-                uncacheable |= isUncacheable(ty);
-            }
-            if (typ.tail)
-            {
-                traverse(*typ.tail);
-                uncacheable |= isUncacheable(*typ.tail);
-            }
-            if (uncacheable)
-                markUncacheable(tp);
-            return false;
+            traverse(ty);
+            uncacheable |= isUncacheable(ty);
         }
-        return true;
+        if (typ.tail)
+        {
+            traverse(*typ.tail);
+            uncacheable |= isUncacheable(*typ.tail);
+        }
+        if (uncacheable)
+            markUncacheable(tp);
+        return false;
     }
 };
 
@@ -1016,7 +1021,7 @@ std::optional<TypeId> generalize(
     FreeTypeSearcher fts{scope, cachedTypes};
     fts.traverse(ty);
 
-    MutatingGeneralizer gen{builtinTypes, scope, cachedTypes, std::move(fts.positiveTypes), std::move(fts.negativeTypes), avoidSealingTables};
+    MutatingGeneralizer gen{arena, builtinTypes, scope, cachedTypes, std::move(fts.positiveTypes), std::move(fts.negativeTypes), avoidSealingTables};
 
     gen.traverse(ty);
 

@@ -16,6 +16,8 @@
 #include <unordered_map>
 #include <optional>
 
+LUAU_FASTFLAG(LuauIncrementalAutocompleteCommentDetection)
+
 namespace Luau
 {
 
@@ -55,6 +57,7 @@ struct SourceModule
     }
 };
 
+bool isWithinComment(const std::vector<Comment>& commentLocations, Position pos);
 bool isWithinComment(const SourceModule& sourceModule, Position pos);
 bool isWithinComment(const ParseResult& result, Position pos);
 
@@ -67,6 +70,9 @@ struct RequireCycle
 struct Module
 {
     ~Module();
+
+    // TODO: Clip this when we clip FFlagLuauSolverV2
+    bool checkedInNewSolver = false;
 
     ModuleName name;
     std::string humanReadableName;
@@ -132,9 +138,6 @@ struct Module
 
     TypePackId returnType = nullptr;
     std::unordered_map<Name, TypeFun> exportedTypeBindings;
-    // We also need to keep DFG data alive between runs
-    std::shared_ptr<DataFlowGraph> dataFlowGraph = nullptr;
-    std::vector<std::unique_ptr<DfgScope>> dfgScopes;
 
     bool hasModuleScope() const;
     ScopePtr getModuleScope() const;

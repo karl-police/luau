@@ -3,6 +3,7 @@
 
 #include "Luau/Ast.h"
 #include "Luau/AstQuery.h"
+#include "Luau/Autocomplete.h"
 #include "Luau/Common.h"
 #include "Luau/EqSatSimplification.h"
 #include "Luau/Parser.h"
@@ -21,11 +22,11 @@
 
 #include "AutocompleteCore.h"
 
+
 LUAU_FASTINT(LuauTypeInferRecursionLimit);
 LUAU_FASTINT(LuauTypeInferIterationLimit);
 LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTFLAG(LuauAllowFragmentParsing);
-LUAU_FASTFLAG(LuauStoreDFGOnModule2);
 LUAU_FASTFLAG(LuauAutocompleteRefactorsForIncrementalAutocomplete)
 
 namespace
@@ -47,6 +48,14 @@ void copyModuleMap(Luau::DenseHashMap<K, V>& result, const Luau::DenseHashMap<K,
 
 namespace Luau
 {
+
+static FrontendModuleResolver& getModuleResolver(Frontend& frontend, std::optional<FrontendOptions> options)
+{
+    if (FFlag::LuauSolverV2 || !options)
+        return frontend.moduleResolver;
+
+    return options->forAutocomplete ? frontend.moduleResolverForAutocomplete : frontend.moduleResolver;
+}
 
 FragmentAutocompleteAncestryResult findAncestryForFragmentParse(AstStatBlock* root, const Position& cursorPos)
 {
@@ -79,6 +88,25 @@ FragmentAutocompleteAncestryResult findAncestryForFragmentParse(AstStatBlock* ro
                     {
                         localStack.push_back(locFun->name);
                         localMap[locFun->name->name] = locFun->name;
+                        if (locFun->location.contains(cursorPos))
+                        {
+                            for (AstLocal* loc : locFun->func->args)
+                            {
+                                localStack.push_back(loc);
+                                localMap[loc->name] = loc;
+                            }
+                        }
+                    }
+                    else if (auto globFun = stat->as<AstStatFunction>())
+                    {
+                        if (globFun->location.contains(cursorPos))
+                        {
+                            for (AstLocal* loc : globFun->func->args)
+                            {
+                                localStack.push_back(loc);
+                                localMap[loc->name] = loc;
+                            }
+                        }
                     }
                 }
             }
@@ -96,7 +124,7 @@ FragmentAutocompleteAncestryResult findAncestryForFragmentParse(AstStatBlock* ro
  * document and attempts to get the concrete text between those points. It returns a pair of:
  * - start offset that represents an index in the source `char*` corresponding to startPos
  * - length, that represents how many more bytes to read to get to endPos.
- * Example - your document is "foo bar baz" and getDocumentOffsets is passed (1, 4) - (1, 8). This function returns the pair {3, 7},
+ * Example - your document is "foo bar baz" and getDocumentOffsets is passed (0, 4), (0, 8). This function returns the pair {3, 5}
  * which corresponds to the string " bar "
  */
 std::pair<size_t, size_t> getDocumentOffsets(const std::string_view& src, const Position& startPos, const Position& endPos)
@@ -109,6 +137,7 @@ std::pair<size_t, size_t> getDocumentOffsets(const std::string_view& src, const 
     size_t endOffset = 0;
     bool foundStart = false;
     bool foundEnd = false;
+
     for (char c : src)
     {
         if (foundStart && foundEnd)
@@ -123,6 +152,8 @@ std::pair<size_t, size_t> getDocumentOffsets(const std::string_view& src, const 
         if (endPos.line == lineCount && endPos.column == colCount)
         {
             endOffset = docOffset;
+            while (endOffset < src.size() && src[endOffset] != '\n')
+                endOffset++;
             foundEnd = true;
         }
 
@@ -139,7 +170,9 @@ std::pair<size_t, size_t> getDocumentOffsets(const std::string_view& src, const 
             colCount = 0;
         }
         else
+        {
             colCount++;
+        }
         docOffset++;
     }
 
@@ -167,13 +200,14 @@ ScopePtr findClosestScope(const ModulePtr& module, const AstStat* nearestStateme
     return closest;
 }
 
-FragmentParseResult parseFragment(const SourceModule& srcModule, std::string_view src, const Position& cursorPos)
+FragmentParseResult parseFragment(
+    const SourceModule& srcModule,
+    std::string_view src,
+    const Position& cursorPos,
+    std::optional<Position> fragmentEndPosition
+)
 {
     FragmentAutocompleteAncestryResult result = findAncestryForFragmentParse(srcModule.root, cursorPos);
-    ParseOptions opts;
-    opts.allowDeclarationSyntax = false;
-    opts.captureComments = false;
-    opts.parseFragment = FragmentParseResumeSettings{std::move(result.localMap), std::move(result.localStack)};
     AstStat* nearestStatement = result.nearestStatement;
 
     const Location& rootSpan = srcModule.root->location;
@@ -182,7 +216,7 @@ FragmentParseResult parseFragment(const SourceModule& srcModule, std::string_vie
     // statement spans multiple lines
     bool multiline = nearestStatement->location.begin.line != nearestStatement->location.end.line;
 
-    const Position endPos = cursorPos;
+    const Position endPos = fragmentEndPosition.value_or(cursorPos);
 
     // We start by re-parsing everything (we'll refine this as we go)
     Position startPos = srcModule.root->location.begin;
@@ -190,30 +224,40 @@ FragmentParseResult parseFragment(const SourceModule& srcModule, std::string_vie
     // If we added to the end of the sourceModule, use the end of the nearest location
     if (appended && multiline)
         startPos = nearestStatement->location.end;
-    // Statement spans one line && cursorPos is on a different line
-    else if (!multiline && cursorPos.line != nearestStatement->location.end.line)
+    // Statement spans one line && cursorPos is either on the same line or after
+    else if (!multiline && cursorPos.line >= nearestStatement->location.end.line)
+        startPos = nearestStatement->location.begin;
+    else if (multiline && nearestStatement->location.end.line < cursorPos.line)
         startPos = nearestStatement->location.end;
     else
         startPos = nearestStatement->location.begin;
 
     auto [offsetStart, parseLength] = getDocumentOffsets(src, startPos, endPos);
-
     const char* srcStart = src.data() + offsetStart;
     std::string_view dbg = src.substr(offsetStart, parseLength);
     const std::shared_ptr<AstNameTable>& nameTbl = srcModule.names;
     FragmentParseResult fragmentResult;
     fragmentResult.fragmentToParse = std::string(dbg.data(), parseLength);
     // For the duration of the incremental parse, we want to allow the name table to re-use duplicate names
-    ParseResult p = Luau::Parser::parse(srcStart, parseLength, *nameTbl, *fragmentResult.alloc.get(), opts);
 
+    ParseOptions opts;
+    opts.allowDeclarationSyntax = false;
+    opts.captureComments = true;
+    opts.parseFragment = FragmentParseResumeSettings{std::move(result.localMap), std::move(result.localStack), startPos};
+    ParseResult p = Luau::Parser::parse(srcStart, parseLength, *nameTbl, *fragmentResult.alloc.get(), opts);
     std::vector<AstNode*> fabricatedAncestry = std::move(result.ancestry);
-    std::vector<AstNode*> fragmentAncestry = findAncestryAtPositionForAutocomplete(p.root, p.root->location.end);
+
+    // Get the ancestry for the fragment at the offset cursor position.
+    // Consumers have the option to request with fragment end position, so we cannot just use the end position of our parse result as the
+    // cursor position. Instead, use the cursor position calculated as an offset from our start position.
+    std::vector<AstNode*> fragmentAncestry = findAncestryAtPositionForAutocomplete(p.root, cursorPos);
     fabricatedAncestry.insert(fabricatedAncestry.end(), fragmentAncestry.begin(), fragmentAncestry.end());
     if (nearestStatement == nullptr)
         nearestStatement = p.root;
     fragmentResult.root = std::move(p.root);
     fragmentResult.ancestry = std::move(fabricatedAncestry);
     fragmentResult.nearestStatement = nearestStatement;
+    fragmentResult.commentLocations = std::move(p.commentLocations);
     return fragmentResult;
 }
 
@@ -242,6 +286,47 @@ ModulePtr copyModule(const ModulePtr& result, std::unique_ptr<Allocator> alloc)
     return incrementalModule;
 }
 
+struct MixedModeIncrementalTCDefFinder : public AstVisitor
+{
+    bool visit(AstExprLocal* local) override
+    {
+        referencedLocalDefs.push_back({local->local, local});
+        return true;
+    }
+
+    // ast defs is just a mapping from expr -> def in general
+    // will get built up by the dfg builder
+
+    // localDefs, we need to copy over
+    std::vector<std::pair<AstLocal*, AstExpr*>> referencedLocalDefs;
+};
+
+void mixedModeCompatibility(
+    const ScopePtr& bottomScopeStale,
+    const ScopePtr& myFakeScope,
+    const ModulePtr& stale,
+    NotNull<DataFlowGraph> dfg,
+    AstStatBlock* program
+)
+{
+    // This code does the following
+    // traverse program
+    // look for ast refs for locals
+    // ask for the corresponding defId from dfg
+    // given that defId, and that expression, in the incremental module, map lvalue types from defID to
+
+    MixedModeIncrementalTCDefFinder finder;
+    program->visit(&finder);
+    std::vector<std::pair<AstLocal*, AstExpr*>> locals = std::move(finder.referencedLocalDefs);
+    for (auto [loc, expr] : locals)
+    {
+        if (std::optional<Binding> binding = bottomScopeStale->linearSearchForBinding(loc->name.value, true))
+        {
+            myFakeScope->lvalueTypes[dfg->getDef(expr)] = binding->typeId;
+        }
+    }
+}
+
 FragmentTypeCheckResult typecheckFragment_(
     Frontend& frontend,
     AstStatBlock* root,
@@ -255,6 +340,7 @@ FragmentTypeCheckResult typecheckFragment_(
     freeze(stale->internalTypes);
     freeze(stale->interfaceTypes);
     ModulePtr incrementalModule = copyModule(stale, std::move(astAllocator));
+    incrementalModule->checkedInNewSolver = true;
     unfreeze(incrementalModule->internalTypes);
     unfreeze(incrementalModule->interfaceTypes);
 
@@ -280,9 +366,10 @@ FragmentTypeCheckResult typecheckFragment_(
     TypeFunctionRuntime typeFunctionRuntime(iceHandler, NotNull{&limits});
 
     /// Create a DataFlowGraph just for the surrounding context
-    auto updatedDfg = DataFlowGraphBuilder::updateGraph(*stale->dataFlowGraph.get(), stale->dfgScopes, root, cursorPos, iceHandler);
-
+    auto dfg = DataFlowGraphBuilder::build(root, iceHandler);
     SimplifierPtr simplifier = newSimplifier(NotNull{&incrementalModule->internalTypes}, frontend.builtinTypes);
+
+    FrontendModuleResolver& resolver = getModuleResolver(frontend, opts);
 
     /// Contraint Generator
     ConstraintGenerator cg{
@@ -290,19 +377,23 @@ FragmentTypeCheckResult typecheckFragment_(
         NotNull{&normalizer},
         NotNull{simplifier.get()},
         NotNull{&typeFunctionRuntime},
-        NotNull{&frontend.moduleResolver},
+        NotNull{&resolver},
         frontend.builtinTypes,
         iceHandler,
         stale->getModuleScope(),
         nullptr,
         nullptr,
-        NotNull{&updatedDfg},
+        NotNull{&dfg},
         {}
     };
+
     cg.rootScope = stale->getModuleScope().get();
     // Any additions to the scope must occur in a fresh scope
     auto freshChildOfNearestScope = std::make_shared<Scope>(closestScope);
     incrementalModule->scopes.emplace_back(root->location, freshChildOfNearestScope);
+
+    // Update freshChildOfNearestScope with the appropriate lvalueTypes
+    mixedModeCompatibility(closestScope, freshChildOfNearestScope, stale, NotNull{&dfg}, root);
 
     // closest Scope -> children = { ...., freshChildOfNearestScope}
     // We need to trim nearestChild from the scope hierarcy
@@ -323,10 +414,10 @@ FragmentTypeCheckResult typecheckFragment_(
         NotNull(cg.rootScope),
         borrowConstraints(cg.constraints),
         incrementalModule->name,
-        NotNull{&frontend.moduleResolver},
+        NotNull{&resolver},
         {},
         nullptr,
-        NotNull{&updatedDfg},
+        NotNull{&dfg},
         limits
     };
 
@@ -353,12 +444,13 @@ FragmentTypeCheckResult typecheckFragment_(
 }
 
 
-FragmentTypeCheckResult typecheckFragment(
+std::pair<FragmentTypeCheckStatus, FragmentTypeCheckResult> typecheckFragment(
     Frontend& frontend,
     const ModuleName& moduleName,
     const Position& cursorPos,
     std::optional<FrontendOptions> opts,
-    std::string_view src
+    std::string_view src,
+    std::optional<Position> fragmentEndPosition
 )
 {
     const SourceModule* sourceModule = frontend.getSourceModule(moduleName);
@@ -368,14 +460,24 @@ FragmentTypeCheckResult typecheckFragment(
         return {};
     }
 
-    ModulePtr module = frontend.moduleResolver.getModule(moduleName);
-    FragmentParseResult parseResult = parseFragment(*sourceModule, src, cursorPos);
+    FrontendModuleResolver& resolver = getModuleResolver(frontend, opts);
+    ModulePtr module = resolver.getModule(moduleName);
+    if (!module)
+    {
+        LUAU_ASSERT(!"Expected Module for fragment typecheck");
+        return {};
+    }
+
+    FragmentParseResult parseResult = parseFragment(*sourceModule, src, cursorPos, fragmentEndPosition);
+    if (isWithinComment(parseResult.commentLocations, fragmentEndPosition.value_or(cursorPos)))
+        return {FragmentTypeCheckStatus::SkipAutocomplete, {}};
+
     FrontendOptions frontendOptions = opts.value_or(frontend.options);
     const ScopePtr& closestScope = findClosestScope(module, parseResult.nearestStatement);
     FragmentTypeCheckResult result =
         typecheckFragment_(frontend, parseResult.root, module, closestScope, cursorPos, std::move(parseResult.alloc), frontendOptions);
     result.ancestry = std::move(parseResult.ancestry);
-    return result;
+    return {FragmentTypeCheckStatus::Success, result};
 }
 
 
@@ -385,12 +487,11 @@ FragmentAutocompleteResult fragmentAutocomplete(
     const ModuleName& moduleName,
     Position cursorPosition,
     std::optional<FrontendOptions> opts,
-    StringCompletionCallback callback
+    StringCompletionCallback callback,
+    std::optional<Position> fragmentEndPosition
 )
 {
-    LUAU_ASSERT(FFlag::LuauSolverV2);
     LUAU_ASSERT(FFlag::LuauAllowFragmentParsing);
-    LUAU_ASSERT(FFlag::LuauStoreDFGOnModule2);
     LUAU_ASSERT(FFlag::LuauAutocompleteRefactorsForIncrementalAutocomplete);
 
     const SourceModule* sourceModule = frontend.getSourceModule(moduleName);
@@ -400,19 +501,29 @@ FragmentAutocompleteResult fragmentAutocomplete(
         return {};
     }
 
-    auto tcResult = typecheckFragment(frontend, moduleName, cursorPosition, opts, src);
+    // If the cursor is within a comment in the stale source module we should avoid providing a recommendation
+    if (isWithinComment(*sourceModule, fragmentEndPosition.value_or(cursorPosition)))
+        return {};
+
+    auto [tcStatus, tcResult] = typecheckFragment(frontend, moduleName, cursorPosition, opts, src, fragmentEndPosition);
+    if (tcStatus == FragmentTypeCheckStatus::SkipAutocomplete)
+        return {};
+
+    auto globalScope = (opts && opts->forAutocomplete) ? frontend.globalsForAutocomplete.globalScope.get() : frontend.globals.globalScope.get();
+
     TypeArena arenaForFragmentAutocomplete;
     auto result = Luau::autocomplete_(
         tcResult.incrementalModule,
         frontend.builtinTypes,
         &arenaForFragmentAutocomplete,
         tcResult.ancestry,
-        frontend.globals.globalScope.get(),
+        globalScope,
         tcResult.freshScope,
         cursorPosition,
         frontend.fileResolver,
         callback
     );
+
     return {std::move(tcResult.incrementalModule), tcResult.freshScope.get(), std::move(arenaForFragmentAutocomplete), std::move(result)};
 }
 

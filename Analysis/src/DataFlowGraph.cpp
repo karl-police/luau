@@ -182,11 +182,9 @@ DataFlowGraph DataFlowGraphBuilder::build(AstStatBlock* block, NotNull<InternalE
 {
     LUAU_TIMETRACE_SCOPE("DataFlowGraphBuilder::build", "Typechecking");
 
-    LUAU_ASSERT(FFlag::LuauSolverV2);
-
     DataFlowGraphBuilder builder;
     builder.handle = handle;
-    DfgScope* moduleScope = builder.makeChildScope(block->location);
+    DfgScope* moduleScope = builder.makeChildScope();
     PushScope ps{builder.scopeStack, moduleScope};
     builder.visitBlockWithoutChildScope(block);
     builder.resolveCaptures();
@@ -208,11 +206,9 @@ std::pair<std::shared_ptr<DataFlowGraph>, std::vector<std::unique_ptr<DfgScope>>
 
     LUAU_TIMETRACE_SCOPE("DataFlowGraphBuilder::build", "Typechecking");
 
-    LUAU_ASSERT(FFlag::LuauSolverV2);
-
     DataFlowGraphBuilder builder;
     builder.handle = handle;
-    DfgScope* moduleScope = builder.makeChildScope(block->location);
+    DfgScope* moduleScope = builder.makeChildScope();
     PushScope ps{builder.scopeStack, moduleScope};
     builder.visitBlockWithoutChildScope(block);
     builder.resolveCaptures();
@@ -224,56 +220,6 @@ std::pair<std::shared_ptr<DataFlowGraph>, std::vector<std::unique_ptr<DfgScope>>
     }
 
     return {std::make_shared<DataFlowGraph>(std::move(builder.graph)), std::move(builder.scopes)};
-}
-
-DataFlowGraph DataFlowGraphBuilder::updateGraph(
-    const DataFlowGraph& staleGraph,
-    const std::vector<std::unique_ptr<DfgScope>>& scopes,
-    AstStatBlock* fragment,
-    const Position& cursorPos,
-    NotNull<InternalErrorReporter> handle
-)
-{
-    LUAU_TIMETRACE_SCOPE("DataFlowGraphBuilder::build", "Typechecking");
-    LUAU_ASSERT(FFlag::LuauSolverV2);
-
-    DataFlowGraphBuilder builder;
-    builder.handle = handle;
-    // Generate a list of prepopulated locals
-    ReferencedDefFinder finder;
-    fragment->visit(&finder);
-    for (AstLocal* loc : finder.referencedLocalDefs)
-    {
-        if (staleGraph.localDefs.contains(loc))
-        {
-            builder.graph.localDefs[loc] = *staleGraph.localDefs.find(loc);
-        }
-    }
-
-    // Figure out which scope we should start re-accumulating DFG information from again
-    DfgScope* nearest = nullptr;
-    for (auto& sc : scopes)
-    {
-        if (nearest == nullptr || (sc->location.begin <= cursorPos && nearest->location.begin < sc->location.begin))
-            nearest = sc.get();
-    }
-
-    // The scope stack should start with the nearest enclosing scope so we can resume DFG'ing correctly
-    PushScope ps{builder.scopeStack, nearest};
-    // Conspire for the current scope in the scope stack to be a fresh dfg scope, parented to the above nearest enclosing scope, so any insertions are
-    // isolated there
-    DfgScope* scope = builder.makeChildScope(fragment->location);
-    PushScope psAgain{builder.scopeStack, scope};
-
-    builder.visitBlockWithoutChildScope(fragment);
-
-    if (FFlag::DebugLuauFreezeArena)
-    {
-        builder.defArena->allocator.freeze();
-        builder.keyArena->allocator.freeze();
-    }
-
-    return std::move(builder.graph);
 }
 
 void DataFlowGraphBuilder::resolveCaptures()
@@ -301,9 +247,9 @@ DfgScope* DataFlowGraphBuilder::currentScope()
     return scopeStack.back();
 }
 
-DfgScope* DataFlowGraphBuilder::makeChildScope(Location loc, DfgScope::ScopeType scopeType)
+DfgScope* DataFlowGraphBuilder::makeChildScope(DfgScope::ScopeType scopeType)
 {
-    return scopes.emplace_back(new DfgScope{currentScope(), scopeType, loc}).get();
+    return scopes.emplace_back(new DfgScope{currentScope(), scopeType}).get();
 }
 
 void DataFlowGraphBuilder::join(DfgScope* p, DfgScope* a, DfgScope* b)
@@ -451,7 +397,7 @@ DefId DataFlowGraphBuilder::lookup(DefId def, const std::string& key)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatBlock* b)
 {
-    DfgScope* child = makeChildScope(b->location);
+    DfgScope* child = makeChildScope();
 
     ControlFlow cf;
     {
@@ -528,8 +474,8 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatIf* i)
 {
     visitExpr(i->condition);
 
-    DfgScope* thenScope = makeChildScope(i->thenbody->location);
-    DfgScope* elseScope = makeChildScope(i->elsebody ? i->elsebody->location : i->location);
+    DfgScope* thenScope = makeChildScope();
+    DfgScope* elseScope = makeChildScope();
 
     ControlFlow thencf;
     {
@@ -563,7 +509,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatIf* i)
 ControlFlow DataFlowGraphBuilder::visit(AstStatWhile* w)
 {
     // TODO(controlflow): entry point has a back edge from exit point
-    DfgScope* whileScope = makeChildScope(w->location, DfgScope::Loop);
+    DfgScope* whileScope = makeChildScope(DfgScope::Loop);
 
     {
         PushScope ps{scopeStack, whileScope};
@@ -579,7 +525,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatWhile* w)
 ControlFlow DataFlowGraphBuilder::visit(AstStatRepeat* r)
 {
     // TODO(controlflow): entry point has a back edge from exit point
-    DfgScope* repeatScope = makeChildScope(r->location, DfgScope::Loop);
+    DfgScope* repeatScope = makeChildScope(DfgScope::Loop);
 
     {
         PushScope ps{scopeStack, repeatScope};
@@ -655,7 +601,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatLocal* l)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatFor* f)
 {
-    DfgScope* forScope = makeChildScope(f->location, DfgScope::Loop);
+    DfgScope* forScope = makeChildScope(DfgScope::Loop);
 
     visitExpr(f->from);
     visitExpr(f->to);
@@ -684,7 +630,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatFor* f)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatForIn* f)
 {
-    DfgScope* forScope = makeChildScope(f->location, DfgScope::Loop);
+    DfgScope* forScope = makeChildScope(DfgScope::Loop);
 
     {
         PushScope ps{scopeStack, forScope};
@@ -780,7 +726,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatLocalFunction* l)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatTypeAlias* t)
 {
-    DfgScope* unreachable = makeChildScope(t->location);
+    DfgScope* unreachable = makeChildScope();
     PushScope ps{scopeStack, unreachable};
 
     visitGenerics(t->generics);
@@ -792,7 +738,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatTypeAlias* t)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatTypeFunction* f)
 {
-    DfgScope* unreachable = makeChildScope(f->location);
+    DfgScope* unreachable = makeChildScope();
     PushScope ps{scopeStack, unreachable};
 
     visitExpr(f->body);
@@ -819,7 +765,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatDeclareFunction* d)
     currentScope()->bindings[d->name] = def;
     captures[d->name].allVersions.push_back(def);
 
-    DfgScope* unreachable = makeChildScope(d->location);
+    DfgScope* unreachable = makeChildScope();
     PushScope ps{scopeStack, unreachable};
 
     visitGenerics(d->generics);
@@ -835,7 +781,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatDeclareClass* d)
     // This declaration does not "introduce" any bindings in value namespace,
     // so there's no symbolic value to begin with. We'll traverse the properties
     // because their type annotations may depend on something in the value namespace.
-    DfgScope* unreachable = makeChildScope(d->location);
+    DfgScope* unreachable = makeChildScope();
     PushScope ps{scopeStack, unreachable};
 
     for (AstDeclaredClassProp prop : d->props)
@@ -846,7 +792,7 @@ ControlFlow DataFlowGraphBuilder::visit(AstStatDeclareClass* d)
 
 ControlFlow DataFlowGraphBuilder::visit(AstStatError* error)
 {
-    DfgScope* unreachable = makeChildScope(error->location);
+    DfgScope* unreachable = makeChildScope();
     PushScope ps{scopeStack, unreachable};
 
     for (AstStat* s : error->statements)
@@ -958,10 +904,7 @@ DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprCall* c)
 
         LUAU_ASSERT(result);
 
-        Location location = currentScope()->location;
-        // This scope starts at the end of the call site and continues to the end of the original scope.
-        location.begin = c->location.end;
-        DfgScope* child = makeChildScope(location);
+        DfgScope* child = makeChildScope();
         scopeStack.push_back(child);
 
         auto [def, key] = *result;
@@ -982,7 +925,6 @@ DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprCall* c)
 DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprIndexName* i)
 {
     auto [parentDef, parentKey] = visitExpr(i->expr);
-
     std::string index = i->index.value;
 
     DefId def = lookup(parentDef, index);
@@ -1007,7 +949,7 @@ DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprIndexExpr* i)
 
 DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprFunction* f)
 {
-    DfgScope* signatureScope = makeChildScope(f->location, DfgScope::Function);
+    DfgScope* signatureScope = makeChildScope(DfgScope::Function);
     PushScope ps{scopeStack, signatureScope};
 
     if (AstLocal* self = f->self)
@@ -1111,7 +1053,7 @@ DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprInterpString* i)
 
 DataFlowResult DataFlowGraphBuilder::visitExpr(AstExprError* error)
 {
-    DfgScope* unreachable = makeChildScope(error->location);
+    DfgScope* unreachable = makeChildScope();
     PushScope ps{scopeStack, unreachable};
 
     for (AstExpr* e : error->expressions)

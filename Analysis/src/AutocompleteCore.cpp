@@ -21,11 +21,11 @@
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAGVARIABLE(AutocompleteRequirePathSuggestions2)
-LUAU_DYNAMIC_FASTINT(LuauTypeSolverRelease)
 LUAU_FASTINT(LuauTypeInferIterationLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 
 LUAU_FASTFLAGVARIABLE(LuauAutocompleteRefactorsForIncrementalAutocomplete)
+LUAU_FASTFLAGVARIABLE(LuauAutocompleteUseLimits)
 
 static const std::unordered_set<std::string> kStatementStartingKeywords =
     {"while", "if", "local", "repeat", "function", "do", "for", "return", "break", "continue", "type", "export"};
@@ -151,6 +151,7 @@ static bool checkTypeMatch(TypeId subTy, TypeId superTy, NotNull<Scope> scope, T
 {
     InternalErrorReporter iceReporter;
     UnifierSharedState unifierState(&iceReporter);
+    SimplifierPtr simplifier = newSimplifier(NotNull{typeArena}, builtinTypes);
     Normalizer normalizer{typeArena, builtinTypes, NotNull{&unifierState}};
 
     if (FFlag::LuauSolverV2)
@@ -163,7 +164,9 @@ static bool checkTypeMatch(TypeId subTy, TypeId superTy, NotNull<Scope> scope, T
         unifierState.counters.recursionLimit = FInt::LuauTypeInferRecursionLimit;
         unifierState.counters.iterationLimit = FInt::LuauTypeInferIterationLimit;
 
-        Subtyping subtyping{builtinTypes, NotNull{typeArena}, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&iceReporter}};
+        Subtyping subtyping{
+            builtinTypes, NotNull{typeArena}, NotNull{simplifier.get()}, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&iceReporter}
+        };
 
         return subtyping.isSubtype(subTy, superTy, scope).isSubtype;
     }
@@ -174,6 +177,12 @@ static bool checkTypeMatch(TypeId subTy, TypeId superTy, NotNull<Scope> scope, T
         // Cost of normalization can be too high for autocomplete response time requirements
         unifier.normalize = false;
         unifier.checkInhabited = false;
+
+        if (FFlag::LuauAutocompleteUseLimits)
+        {
+            unifierState.counters.recursionLimit = FInt::LuauTypeInferRecursionLimit;
+            unifierState.counters.iterationLimit = FInt::LuauTypeInferIterationLimit;
+        }
 
         return unifier.canUnify(subTy, superTy).empty();
     }
@@ -1702,7 +1711,7 @@ AutocompleteResult autocomplete_(
     NotNull<BuiltinTypes> builtinTypes,
     TypeArena* typeArena,
     std::vector<AstNode*>& ancestry,
-    Scope* globalScope,
+    Scope* globalScope, // [TODO] This is unused argument, do we really need this?
     const ScopePtr& scopeAtPosition,
     Position position,
     FileResolver* fileResolver,

@@ -17,7 +17,6 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(LuauMetatableFollow)
 
 TEST_SUITE_BEGIN("TypeInferOperators");
 
@@ -801,7 +800,10 @@ TEST_CASE_FIXTURE(Fixture, "strict_binary_op_where_lhs_unknown")
             "Operator '+' could not be applied to operands of types unknown and unknown; there is no corresponding overload for __add",
             toString(result.errors[0])
         );
-        CHECK_EQ("Operator '-' could not be applied to operands of types unknown and unknown; there is no corresponding overload for __sub", toString(result.errors[1]));
+        CHECK_EQ(
+            "Operator '-' could not be applied to operands of types unknown and unknown; there is no corresponding overload for __sub",
+            toString(result.errors[1])
+        );
     }
     else
     {
@@ -1614,8 +1616,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "compound_operator_on_upvalue")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "metatable_operator_follow")
 {
-    ScopedFastFlag luauMetatableFollow{FFlag::LuauMetatableFollow, true};
-
     CheckResult result = check(R"(
 local t1 = {}
 local t2 = {}

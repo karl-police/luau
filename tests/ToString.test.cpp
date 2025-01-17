@@ -13,7 +13,6 @@ using namespace Luau;
 LUAU_FASTFLAG(LuauRecursiveTypeParameterRestriction);
 LUAU_FASTFLAG(LuauSolverV2);
 LUAU_FASTFLAG(LuauAttributeSyntax);
-LUAU_FASTFLAG(LuauUserDefinedTypeFunctions2)
 
 TEST_SUITE_BEGIN("ToString");
 
@@ -212,8 +211,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "exhaustive_toString_of_cyclic_table")
         CHECK(
             "t2 where "
             "t1 = { __index: t1, __mul: ((t2, number) -> t2) & ((t2, t2) -> t2), new: () -> t2 } ; "
-            "t2 = { @metatable t1, { x: number, y: number, z: number } }" ==
-            a
+            "t2 = { @metatable t1, { x: number, y: number, z: number } }" == a
         );
     }
     else
@@ -969,7 +967,7 @@ TEST_CASE_FIXTURE(Fixture, "correct_stringification_user_defined_type_functions"
 
     Type tv{tftt};
 
-    if (FFlag::LuauSolverV2 && FFlag::LuauUserDefinedTypeFunctions2)
+    if (FFlag::LuauSolverV2)
         CHECK_EQ(toString(&tv, {}), "woohoo<number>");
 }
 

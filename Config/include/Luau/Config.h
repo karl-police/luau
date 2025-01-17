@@ -21,10 +21,10 @@ constexpr const char* kConfigName = ".luaurc";
 struct Config
 {
     Config();
-    Config(const Config& other) noexcept;
-    Config& operator=(const Config& other) noexcept;
-    Config(Config&& other) noexcept = default;
-    Config& operator=(Config&& other) noexcept = default;
+    Config(const Config& other);
+    Config& operator=(const Config& other);
+    Config(Config&& other) = default;
+    Config& operator=(Config&& other) = default;
 
     Mode mode = Mode::Nonstrict;
 
@@ -42,11 +42,12 @@ struct Config
     {
         std::string value;
         std::string_view configLocation;
+        std::string originalCase; // The alias in its original case.
     };
 
     DenseHashMap<std::string, AliasInfo> aliases{""};
 
-    void setAlias(std::string alias, const std::string& value, const std::string configLocation);
+    void setAlias(std::string alias, std::string value, const std::string& configLocation);
 
 private:
     // Prevents making unnecessary copies of the same config location string.

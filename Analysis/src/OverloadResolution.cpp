@@ -16,6 +16,7 @@ namespace Luau
 OverloadResolver::OverloadResolver(
     NotNull<BuiltinTypes> builtinTypes,
     NotNull<TypeArena> arena,
+    NotNull<Simplifier> simplifier,
     NotNull<Normalizer> normalizer,
     NotNull<TypeFunctionRuntime> typeFunctionRuntime,
     NotNull<Scope> scope,
@@ -25,12 +26,13 @@ OverloadResolver::OverloadResolver(
 )
     : builtinTypes(builtinTypes)
     , arena(arena)
+    , simplifier(simplifier)
     , normalizer(normalizer)
     , typeFunctionRuntime(typeFunctionRuntime)
     , scope(scope)
     , ice(reporter)
     , limits(limits)
-    , subtyping({builtinTypes, arena, normalizer, typeFunctionRuntime, ice})
+    , subtyping({builtinTypes, arena, simplifier, normalizer, typeFunctionRuntime, ice})
     , callLoc(callLocation)
 {
 }
@@ -202,7 +204,7 @@ std::pair<OverloadResolver::Analysis, ErrorVec> OverloadResolver::checkOverload_
 )
 {
     FunctionGraphReductionResult result = reduceTypeFunctions(
-        fnTy, callLoc, TypeFunctionContext{arena, builtinTypes, scope, normalizer, typeFunctionRuntime, ice, limits}, /*force=*/true
+        fnTy, callLoc, TypeFunctionContext{arena, builtinTypes, scope, simplifier, normalizer, typeFunctionRuntime, ice, limits}, /*force=*/true
     );
     if (!result.errors.empty())
         return {OverloadIsNonviable, result.errors};
@@ -404,9 +406,10 @@ void OverloadResolver::add(Analysis analysis, TypeId ty, ErrorVec&& errors)
 
 // we wrap calling the overload resolver in a separate function to reduce overall stack pressure in `solveFunctionCall`.
 // this limits the lifetime of `OverloadResolver`, a large type, to only as long as it is actually needed.
-std::optional<TypeId> selectOverload(
+static std::optional<TypeId> selectOverload(
     NotNull<BuiltinTypes> builtinTypes,
     NotNull<TypeArena> arena,
+    NotNull<Simplifier> simplifier,
     NotNull<Normalizer> normalizer,
     NotNull<TypeFunctionRuntime> typeFunctionRuntime,
     NotNull<Scope> scope,
@@ -417,8 +420,9 @@ std::optional<TypeId> selectOverload(
     TypePackId argsPack
 )
 {
-    OverloadResolver resolver{builtinTypes, arena, normalizer, typeFunctionRuntime, scope, iceReporter, limits, location};
-    auto [status, overload] = resolver.selectOverload(fn, argsPack);
+    auto resolver =
+        std::make_unique<OverloadResolver>(builtinTypes, arena, simplifier, normalizer, typeFunctionRuntime, scope, iceReporter, limits, location);
+    auto [status, overload] = resolver->selectOverload(fn, argsPack);
 
     if (status == OverloadResolver::Analysis::Ok)
         return overload;
@@ -432,6 +436,7 @@ std::optional<TypeId> selectOverload(
 SolveResult solveFunctionCall(
     NotNull<TypeArena> arena,
     NotNull<BuiltinTypes> builtinTypes,
+    NotNull<Simplifier> simplifier,
     NotNull<Normalizer> normalizer,
     NotNull<TypeFunctionRuntime> typeFunctionRuntime,
     NotNull<InternalErrorReporter> iceReporter,
@@ -443,7 +448,7 @@ SolveResult solveFunctionCall(
 )
 {
     std::optional<TypeId> overloadToUse =
-        selectOverload(builtinTypes, arena, normalizer, typeFunctionRuntime, scope, iceReporter, limits, location, fn, argsPack);
+        selectOverload(builtinTypes, arena, simplifier, normalizer, typeFunctionRuntime, scope, iceReporter, limits, location, fn, argsPack);
     if (!overloadToUse)
         return {SolveResult::NoMatchingOverload};
 
@@ -456,9 +461,9 @@ SolveResult solveFunctionCall(
 
     if (!u2.genericSubstitutions.empty() || !u2.genericPackSubstitutions.empty())
     {
-        Instantiation2 instantiation{arena, std::move(u2.genericSubstitutions), std::move(u2.genericPackSubstitutions)};
+        auto instantiation = std::make_unique<Instantiation2>(arena, std::move(u2.genericSubstitutions), std::move(u2.genericPackSubstitutions));
 
-        std::optional<TypePackId> subst = instantiation.substitute(resultPack);
+        std::optional<TypePackId> subst = instantiation->substitute(resultPack);
 
         if (!subst)
             return {SolveResult::CodeTooComplex};

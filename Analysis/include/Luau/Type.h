@@ -608,7 +608,8 @@ struct UserDefinedFunctionData
     // References to AST elements are owned by the Module allocator which also stores this type
     AstStatTypeFunction* definition = nullptr;
 
-    DenseHashMap<Name, AstStatTypeFunction*> environment{""};
+    DenseHashMap<Name, std::pair<AstStatTypeFunction*, size_t>> environment{""};
+    DenseHashMap<Name, AstStatTypeFunction*> environment_DEPRECATED{""};
 };
 
 /**
@@ -625,7 +626,7 @@ struct TypeFunctionInstanceType
     std::vector<TypeId> typeArguments;
     std::vector<TypePackId> packArguments;
 
-    std::optional<AstName> userFuncName;          // Name of the user-defined type function; only available for UDTFs
+    std::optional<AstName> userFuncName; // Name of the user-defined type function; only available for UDTFs
     UserDefinedFunctionData userFuncData;
 
     TypeFunctionInstanceType(
@@ -762,7 +763,7 @@ struct NegationType
     TypeId ty;
 };
 
-using ErrorType = Unifiable::Error;
+using ErrorType = Unifiable::Error<TypeId>;
 
 using TypeVariant = Unifiable::Variant<
     TypeId,

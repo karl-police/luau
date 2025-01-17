@@ -27,9 +27,9 @@
 
 LUAU_FASTFLAG(DebugLuauFreezeArena)
 LUAU_FASTFLAG(DebugLuauForceAllNewSolverTests)
+LUAU_FASTFLAG(LuauVectorDefinitionsExtra)
 
-#define DOES_NOT_PASS_NEW_SOLVER_GUARD_IMPL(line) \
-    ScopedFastFlag sff_##line{FFlag::LuauSolverV2, FFlag::DebugLuauForceAllNewSolverTests};
+#define DOES_NOT_PASS_NEW_SOLVER_GUARD_IMPL(line) ScopedFastFlag sff_##line{FFlag::LuauSolverV2, FFlag::DebugLuauForceAllNewSolverTests};
 
 #define DOES_NOT_PASS_NEW_SOLVER_GUARD() DOES_NOT_PASS_NEW_SOLVER_GUARD_IMPL(__LINE__)
 
@@ -76,8 +76,8 @@ struct Fixture
 
     // Throws Luau::ParseErrors if the parse fails.
     AstStatBlock* parse(const std::string& source, const ParseOptions& parseOptions = {});
-    CheckResult check(Mode mode, const std::string& source);
-    CheckResult check(const std::string& source);
+    CheckResult check(Mode mode, const std::string& source, std::optional<FrontendOptions> = std::nullopt);
+    CheckResult check(const std::string& source, std::optional<FrontendOptions> = std::nullopt);
 
     LintResult lint(const std::string& source, const std::optional<LintOptions>& lintOptions = {});
     LintResult lintModule(const ModuleName& moduleName, const std::optional<LintOptions>& lintOptions = {});
@@ -113,6 +113,8 @@ struct Fixture
     // In that case, flag can be forced to 'true' using the example below:
     // ScopedFastFlag sff_LuauExampleFlagDefinition{FFlag::LuauExampleFlagDefinition, true};
 
+    ScopedFastFlag sff_LuauVectorDefinitionsExtra{FFlag::LuauVectorDefinitionsExtra, true};
+
     // Arena freezing marks the `TypeArena`'s underlying memory as read-only, raising an access violation whenever you mutate it.
     // This is useful for tracking down violations of Luau's memory model.
     ScopedFastFlag sff_DebugLuauFreezeArena{FFlag::DebugLuauFreezeArena, true};
@@ -139,7 +141,7 @@ struct Fixture
 
     void registerTestTypes();
 
-    LoadDefinitionFileResult loadDefinition(const std::string& source);
+    LoadDefinitionFileResult loadDefinition(const std::string& source, bool forAutocomplete = false);
 };
 
 struct BuiltinsFixture : Fixture
