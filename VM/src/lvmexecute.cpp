@@ -16,6 +16,8 @@
 
 #include <string.h>
 
+LUAU_DYNAMIC_FASTFLAG(LuauPopIncompleteCi)
+
 // Disable c99-designator to avoid the warning in CGOTO dispatch table
 #ifdef __clang__
 #if __has_warning("-Wc99-designator")
@@ -935,7 +937,14 @@ reentry:
                 // note: this reallocs stack, but we don't need to VM_PROTECT this
                 // this is because we're going to modify base/savedpc manually anyhow
                 // crucially, we can't use ra/argtop after this line
-                luaD_checkstack(L, ccl->stacksize);
+                if (DFFlag::LuauPopIncompleteCi)
+                {
+                    luaD_checkstackfornewci(L, ccl->stacksize);
+                }
+                else
+                {
+                    luaD_checkstack(L, ccl->stacksize);
+                }
 
                 LUAU_ASSERT(ci->top <= L->stack_last);
 
@@ -2923,10 +2932,13 @@ reentry:
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
-                    setobj2s(L, L->top, arg2);
-                    setobj2s(L, L->top + 1, arg3);
+                    // note: it's safe to push arguments past top for complicated reasons (see top of the file)
+                    LUAU_ASSERT(L->top + 2 < L->stack + L->stacksize);
+                    StkId top = L->top;
+                    setobj2s(L, top, arg2);
+                    setobj2s(L, top + 1, arg3);
 
-                    int n = f(L, ra, arg1, nresults, L->top, nparams);
+                    int n = f(L, ra, arg1, nresults, top, nparams);
 
                     if (n >= 0)
                     {
@@ -3068,7 +3080,14 @@ int luau_precall(lua_State* L, StkId func, int nresults)
     L->base = ci->base;
     // Note: L->top is assigned externally
 
-    luaD_checkstack(L, ccl->stacksize);
+    if (DFFlag::LuauPopIncompleteCi)
+    {
+        luaD_checkstackfornewci(L, ccl->stacksize);
+    }
+    else
+    {
+        luaD_checkstack(L, ccl->stacksize);
+    }
     LUAU_ASSERT(ci->top <= L->stack_last);
 
     if (!ccl->isC)

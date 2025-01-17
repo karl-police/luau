@@ -31,8 +31,9 @@
 #include <ostream>
 
 LUAU_FASTFLAG(DebugLuauMagicTypes)
-LUAU_FASTFLAG(LuauUserDefinedTypeFunctions2)
-LUAU_DYNAMIC_FASTINT(LuauTypeSolverRelease)
+
+LUAU_FASTFLAG(InferGlobalTypes)
+LUAU_FASTFLAGVARIABLE(LuauTableKeysAreRValues)
 
 namespace Luau
 {
@@ -268,6 +269,7 @@ struct InternalTypeFunctionFinder : TypeOnceVisitor
 
 void check(
     NotNull<BuiltinTypes> builtinTypes,
+    NotNull<Simplifier> simplifier,
     NotNull<TypeFunctionRuntime> typeFunctionRuntime,
     NotNull<UnifierSharedState> unifierState,
     NotNull<TypeCheckLimits> limits,
@@ -278,7 +280,7 @@ void check(
 {
     LUAU_TIMETRACE_SCOPE("check", "Typechecking");
 
-    TypeChecker2 typeChecker{builtinTypes, typeFunctionRuntime, unifierState, limits, logger, &sourceModule, module};
+    TypeChecker2 typeChecker{builtinTypes, simplifier, typeFunctionRuntime, unifierState, limits, logger, &sourceModule, module};
 
     typeChecker.visit(sourceModule.root);
 
@@ -295,6 +297,7 @@ void check(
 
 TypeChecker2::TypeChecker2(
     NotNull<BuiltinTypes> builtinTypes,
+    NotNull<Simplifier> simplifier,
     NotNull<TypeFunctionRuntime> typeFunctionRuntime,
     NotNull<UnifierSharedState> unifierState,
     NotNull<TypeCheckLimits> limits,
@@ -303,6 +306,7 @@ TypeChecker2::TypeChecker2(
     Module* module
 )
     : builtinTypes(builtinTypes)
+    , simplifier(simplifier)
     , typeFunctionRuntime(typeFunctionRuntime)
     , logger(logger)
     , limits(limits)
@@ -310,7 +314,7 @@ TypeChecker2::TypeChecker2(
     , sourceModule(sourceModule)
     , module(module)
     , normalizer{&module->internalTypes, builtinTypes, unifierState, /* cacheInhabitance */ true}
-    , _subtyping{builtinTypes, NotNull{&module->internalTypes}, NotNull{&normalizer}, typeFunctionRuntime, NotNull{unifierState->iceHandler}}
+    , _subtyping{builtinTypes, NotNull{&module->internalTypes}, simplifier, NotNull{&normalizer}, typeFunctionRuntime, NotNull{unifierState->iceHandler}}
     , subtyping(&_subtyping)
 {
 }
@@ -492,7 +496,9 @@ TypeId TypeChecker2::checkForTypeFunctionInhabitance(TypeId instance, Location l
         reduceTypeFunctions(
             instance,
             location,
-            TypeFunctionContext{NotNull{&module->internalTypes}, builtinTypes, stack.back(), NotNull{&normalizer}, typeFunctionRuntime, ice, limits},
+            TypeFunctionContext{
+                NotNull{&module->internalTypes}, builtinTypes, stack.back(), simplifier, NotNull{&normalizer}, typeFunctionRuntime, ice, limits
+            },
             true
         )
             .errors;
@@ -1014,7 +1020,8 @@ void TypeChecker2::visit(AstStatForIn* forInStatement)
     {
         reportError(OptionalValueAccess{iteratorTy}, forInStatement->values.data[0]->location);
     }
-    else if (std::optional<TypeId> iterMmTy = findMetatableEntry(builtinTypes, module->errors, iteratorTy, "__iter", forInStatement->values.data[0]->location))
+    else if (std::optional<TypeId> iterMmTy =
+                 findMetatableEntry(builtinTypes, module->errors, iteratorTy, "__iter", forInStatement->values.data[0]->location))
     {
         Instantiation instantiation{TxnLog::empty(), &arena, builtinTypes, TypeLevel{}, scope};
 
@@ -1199,8 +1206,6 @@ void TypeChecker2::visit(AstStatTypeAlias* stat)
 void TypeChecker2::visit(AstStatTypeFunction* stat)
 {
     // TODO: add type checking for user-defined type functions
-    if (!FFlag::LuauUserDefinedTypeFunctions2)
-        reportError(TypeError{stat->location, GenericError{"This syntax is not supported"}});
 }
 
 void TypeChecker2::visit(AstTypeList types)
@@ -1351,7 +1356,17 @@ void TypeChecker2::visit(AstExprGlobal* expr)
 {
     NotNull<Scope> scope = stack.back();
     if (!scope->lookup(expr->name))
+    {
         reportError(UnknownSymbol{expr->name.value, UnknownSymbol::Binding}, expr->location);
+    }
+    else if (FFlag::InferGlobalTypes)
+    {
+        if (scope->shouldWarnGlobal(expr->name.value) && !warnedGlobals.contains(expr->name.value))
+        {
+            reportError(UnknownSymbol{expr->name.value, UnknownSymbol::Binding}, expr->location);
+            warnedGlobals.insert(expr->name.value);
+        }
+    }
 }
 
 void TypeChecker2::visit(AstExprVarargs* expr)
@@ -1450,6 +1465,7 @@ void TypeChecker2::visitCall(AstExprCall* call)
     OverloadResolver resolver{
         builtinTypes,
         NotNull{&module->internalTypes},
+        simplifier,
         NotNull{&normalizer},
         typeFunctionRuntime,
         NotNull{stack.back()},
@@ -1625,10 +1641,6 @@ void TypeChecker2::indexExprMetatableHelper(AstExprIndexExpr* indexExpr, const M
         indexExprMetatableHelper(indexExpr, mtmt, exprType, indexType);
     else
     {
-        if (!(DFInt::LuauTypeSolverRelease >= 647))
-        {
-            LUAU_ASSERT(tt || get<PrimitiveType>(follow(metaTable->table)));
-        }
         // CLI-122161: We're not handling unions correctly (probably).
         reportError(CannotExtendTable{exprType, CannotExtendTable::Indexer, "indexer??"}, indexExpr->location);
     }
@@ -1836,11 +1848,18 @@ void TypeChecker2::visit(AstExprFunction* fn)
 
 void TypeChecker2::visit(AstExprTable* expr)
 {
-    // TODO!
     for (const AstExprTable::Item& item : expr->items)
     {
-        if (item.key)
-            visit(item.key, ValueContext::LValue);
+        if (FFlag::LuauTableKeysAreRValues)
+        {
+            if (item.key)
+                visit(item.key, ValueContext::RValue);
+        }
+        else
+        {
+            if (item.key)
+                visit(item.key, ValueContext::LValue);
+        }
         visit(item.value, ValueContext::RValue);
     }
 }
@@ -2349,7 +2368,7 @@ TypeId TypeChecker2::flattenPack(TypePackId pack)
 
         return result;
     }
-    else if (get<Unifiable::Error>(pack))
+    else if (get<ErrorTypePack>(pack))
         return builtinTypes->errorRecoveryType();
     else if (finite(pack) && size(pack) == 0)
         return builtinTypes->nilType; // `(f())` where `f()` returns no values is coerced into `nil`
@@ -3023,7 +3042,7 @@ PropertyType TypeChecker2::hasIndexTypeFromType(
         {
             TypeId indexType = follow(tt->indexer->indexType);
             TypeId givenType = module->internalTypes.addType(SingletonType{StringSingleton{prop}});
-            if (isSubtype(givenType, indexType, NotNull{module->getModuleScope().get()}, builtinTypes, *ice))
+            if (isSubtype(givenType, indexType, NotNull{module->getModuleScope().get()}, builtinTypes, simplifier, *ice))
                 return {NormalizationResult::True, {tt->indexer->indexResultType}};
         }
 

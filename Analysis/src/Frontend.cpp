@@ -45,11 +45,12 @@ LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile)
 LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode)
-LUAU_FASTFLAGVARIABLE(LuauUserDefinedTypeFunctionNoEvaluation)
 LUAU_DYNAMIC_FASTFLAGVARIABLE(LuauRunCustomModuleChecks, false)
 
 LUAU_FASTFLAG(StudioReportLuauAny2)
-LUAU_FASTFLAGVARIABLE(LuauStoreDFGOnModule2)
+LUAU_FASTFLAGVARIABLE(LuauStoreSolverTypeOnModule)
+
+LUAU_FASTFLAGVARIABLE(LuauReferenceAllocatorInNewSolver)
 
 namespace Luau
 {
@@ -744,6 +745,32 @@ std::optional<CheckResult> Frontend::getCheckResult(const ModuleName& name, bool
     return checkResult;
 }
 
+std::vector<ModuleName> Frontend::getRequiredScripts(const ModuleName& name)
+{
+    RequireTraceResult require = requireTrace[name];
+    if (isDirty(name))
+    {
+        std::optional<SourceCode> source = fileResolver->readSource(name);
+        if (!source)
+        {
+            return {};
+        }
+        const Config& config = configResolver->getConfig(name);
+        ParseOptions opts = config.parseOptions;
+        opts.captureComments = true;
+        SourceModule result = parse(name, source->source, opts);
+        result.type = source->type;
+        require = traceRequires(fileResolver, result.root, name);
+    }
+    std::vector<std::string> requiredModuleNames;
+    requiredModuleNames.reserve(require.requireList.size());
+    for (const auto& [moduleName, _] : require.requireList)
+    {
+        requiredModuleNames.push_back(moduleName);
+    }
+    return requiredModuleNames;
+}
+
 bool Frontend::parseGraph(
     std::vector<ModuleName>& buildQueue,
     const ModuleName& root,
@@ -1285,11 +1312,18 @@ ModulePtr check(
     LUAU_TIMETRACE_ARGUMENT("name", sourceModule.humanReadableName.c_str());
 
     ModulePtr result = std::make_shared<Module>();
+    if (FFlag::LuauStoreSolverTypeOnModule)
+        result->checkedInNewSolver = true;
     result->name = sourceModule.name;
     result->humanReadableName = sourceModule.humanReadableName;
     result->mode = mode;
     result->internalTypes.owningModule = result.get();
     result->interfaceTypes.owningModule = result.get();
+    if (FFlag::LuauReferenceAllocatorInNewSolver)
+    {
+        result->allocator = sourceModule.allocator;
+        result->names = sourceModule.names;
+    }
 
     iceHandler->moduleName = sourceModule.name;
 
@@ -1304,19 +1338,7 @@ ModulePtr check(
         }
     }
 
-    DataFlowGraph oldDfg = DataFlowGraphBuilder::build(sourceModule.root, iceHandler);
-    DataFlowGraph* dfgForConstraintGeneration = nullptr;
-    if (FFlag::LuauStoreDFGOnModule2)
-    {
-        auto [dfg, scopes] = DataFlowGraphBuilder::buildShared(sourceModule.root, iceHandler);
-        result->dataFlowGraph = std::move(dfg);
-        result->dfgScopes = std::move(scopes);
-        dfgForConstraintGeneration = result->dataFlowGraph.get();
-    }
-    else
-    {
-        dfgForConstraintGeneration = &oldDfg;
-    }
+    DataFlowGraph dfg = DataFlowGraphBuilder::build(sourceModule.root, iceHandler);
 
     UnifierSharedState unifierState{iceHandler};
     unifierState.counters.recursionLimit = FInt::LuauTypeInferRecursionLimit;
@@ -1326,8 +1348,7 @@ ModulePtr check(
     SimplifierPtr simplifier = newSimplifier(NotNull{&result->internalTypes}, builtinTypes);
     TypeFunctionRuntime typeFunctionRuntime{iceHandler, NotNull{&limits}};
 
-    if (FFlag::LuauUserDefinedTypeFunctionNoEvaluation)
-        typeFunctionRuntime.allowEvaluation = sourceModule.parseErrors.empty();
+    typeFunctionRuntime.allowEvaluation = sourceModule.parseErrors.empty();
 
     ConstraintGenerator cg{
         result,
@@ -1340,7 +1361,7 @@ ModulePtr check(
         parentScope,
         std::move(prepareModuleScope),
         logger.get(),
-        NotNull{dfgForConstraintGeneration},
+        NotNull{&dfg},
         requireCycles
     };
 
@@ -1357,7 +1378,7 @@ ModulePtr check(
         moduleResolver,
         requireCycles,
         logger.get(),
-        NotNull{dfgForConstraintGeneration},
+        NotNull{&dfg},
         limits
     };
 
@@ -1411,38 +1432,30 @@ ModulePtr check(
         switch (mode)
         {
         case Mode::Nonstrict:
-            if (FFlag::LuauStoreDFGOnModule2)
-            {
-                Luau::checkNonStrict(
-                    builtinTypes,
-                    NotNull{&typeFunctionRuntime},
-                    iceHandler,
-                    NotNull{&unifierState},
-                    NotNull{dfgForConstraintGeneration},
-                    NotNull{&limits},
-                    sourceModule,
-                    result.get()
-                );
-            }
-            else
-            {
-                Luau::checkNonStrict(
-                    builtinTypes,
-                    NotNull{&typeFunctionRuntime},
-                    iceHandler,
-                    NotNull{&unifierState},
-                    NotNull{&oldDfg},
-                    NotNull{&limits},
-                    sourceModule,
-                    result.get()
-                );
-            }
+            Luau::checkNonStrict(
+                builtinTypes,
+                NotNull{simplifier.get()},
+                NotNull{&typeFunctionRuntime},
+                iceHandler,
+                NotNull{&unifierState},
+                NotNull{&dfg},
+                NotNull{&limits},
+                sourceModule,
+                result.get()
+            );
             break;
         case Mode::Definition:
             // fallthrough intentional
         case Mode::Strict:
             Luau::check(
-                builtinTypes, NotNull{&typeFunctionRuntime}, NotNull{&unifierState}, NotNull{&limits}, logger.get(), sourceModule, result.get()
+                builtinTypes,
+                NotNull{simplifier.get()},
+                NotNull{&typeFunctionRuntime},
+                NotNull{&unifierState},
+                NotNull{&limits},
+                logger.get(),
+                sourceModule,
+                result.get()
             );
             break;
         case Mode::NoCheck:
