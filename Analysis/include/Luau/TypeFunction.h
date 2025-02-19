@@ -241,7 +241,10 @@ struct BuiltinTypeFunctions
     TypeFunction indexFunc;
     TypeFunction rawgetFunc;
 
-    // Testing
+    TypeFunction setmetatableFunc;
+    TypeFunction getmetatableFunc;
+	
+	// Testing
     TypeFunction tabletypeFunc;
 
     void addToScope(NotNull<TypeArena> arena, NotNull<Scope> scope) const;

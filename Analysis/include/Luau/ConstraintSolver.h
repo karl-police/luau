@@ -170,7 +170,7 @@ struct ConstraintSolver
      **/
     void finalizeTypeFunctions();
 
-    bool isDone();
+    bool isDone() const;
 
 private:
     /**
@@ -302,10 +302,10 @@ public:
     // FIXME: This use of a boolean for the return result is an appalling
     // interface.
     bool blockOnPendingTypes(TypeId target, NotNull<const Constraint> constraint);
-    bool blockOnPendingTypes(TypePackId target, NotNull<const Constraint> constraint);
+    bool blockOnPendingTypes(TypePackId targetPack, NotNull<const Constraint> constraint);
 
     void unblock(NotNull<const Constraint> progressed);
-    void unblock(TypeId progressed, Location location);
+    void unblock(TypeId ty, Location location);
     void unblock(TypePackId progressed, Location location);
     void unblock(const std::vector<TypeId>& types, Location location);
     void unblock(const std::vector<TypePackId>& packs, Location location);
@@ -347,7 +347,7 @@ public:
      * @param location the location where the require is taking place; used for
      * error locations.
      **/
-    TypeId resolveModule(const ModuleInfo& module, const Location& location);
+    TypeId resolveModule(const ModuleInfo& info, const Location& location);
 
     void reportError(TypeErrorData&& data, const Location& location);
     void reportError(TypeError e);
@@ -431,6 +431,11 @@ public:
     void throwUserCancelError() const;
 
     ToStringOptions opts;
+
+    void fillInDiscriminantTypes(
+        NotNull<const Constraint> constraint,
+        const std::vector<std::optional<TypeId>>& discriminantTypes
+    );
 };
 
 void dump(NotNull<Scope> rootScope, struct ToStringOptions& opts);

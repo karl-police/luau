@@ -10,7 +10,7 @@
 
 #include <string.h>
 
-LUAU_FASTFLAGVARIABLE(LuauBufferBitMethods)
+LUAU_FASTFLAGVARIABLE(LuauBufferBitMethods2)
 
 // while C API returns 'size_t' for binary compatibility in case of future extensions,
 // in the current implementation, length and offset are limited to 31 bits
@@ -269,7 +269,13 @@ static int buffer_readbits(lua_State* L)
     unsigned endbyte = unsigned((bitoffset + bitcount + 7) / 8);
 
     uint64_t data = 0;
+
+#if defined(LUAU_BIG_ENDIAN)
+    for (int i = int(endbyte) - 1; i >= int(startbyte); i--)
+        data = (data << 8) + uint8_t(((char*)buf)[i]);
+#else
     memcpy(&data, (char*)buf + startbyte, endbyte - startbyte);
+#endif
 
     uint64_t subbyteoffset = bitoffset & 0x7;
     uint64_t mask = (1ull << bitcount) - 1;
@@ -299,14 +305,28 @@ static int buffer_writebits(lua_State* L)
     unsigned endbyte = unsigned((bitoffset + bitcount + 7) / 8);
 
     uint64_t data = 0;
+
+#if defined(LUAU_BIG_ENDIAN)
+    for (int i = int(endbyte) - 1; i >= int(startbyte); i--)
+        data = data * 256 + uint8_t(((char*)buf)[i]);
+#else
     memcpy(&data, (char*)buf + startbyte, endbyte - startbyte);
+#endif
 
     uint64_t subbyteoffset = bitoffset & 0x7;
     uint64_t mask = ((1ull << bitcount) - 1) << subbyteoffset;
 
     data = (data & ~mask) | ((uint64_t(value) << subbyteoffset) & mask);
 
+#if defined(LUAU_BIG_ENDIAN)
+    for (int i = int(startbyte); i < int(endbyte); i++)
+    {
+        ((char*)buf)[i] = data & 0xff;
+        data >>= 8;
+    }
+#else
     memcpy((char*)buf + startbyte, &data, endbyte - startbyte);
+#endif
     return 0;
 }
 
@@ -370,7 +390,7 @@ static const luaL_Reg bufferlib[] = {
 
 int luaopen_buffer(lua_State* L)
 {
-    luaL_register(L, LUA_BUFFERLIBNAME, FFlag::LuauBufferBitMethods ? bufferlib : bufferlib_DEPRECATED);
+    luaL_register(L, LUA_BUFFERLIBNAME, FFlag::LuauBufferBitMethods2 ? bufferlib : bufferlib_DEPRECATED);
 
     return 1;
 }
