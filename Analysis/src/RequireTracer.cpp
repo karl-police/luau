@@ -4,6 +4,11 @@
 #include "Luau/Ast.h"
 #include "Luau/Module.h"
 
+
+// Remove after TESTING
+#include "Luau/Transpiler.h"
+#include "Luau/AstJsonEncoder.h"
+
 namespace Luau
 {
 
@@ -19,6 +24,16 @@ struct RequireTracer : AstVisitor
 
     bool visit(AstExprTypeAssertion* expr) override
     {
+        /*Luau::dump(expr);
+        printf(
+            "%s\n", Luau::toJson(expr).c_str()
+        );*/
+
+        /*if (AstTypeTypeof* possibleTypeof = expr->annotation->as<AstTypeTypeof>())
+        {
+            return true;
+        }*/
+
         // suppress `require() :: any`
         return false;
     }
@@ -67,6 +82,9 @@ struct RequireTracer : AstVisitor
 
     AstExpr* getDependent(AstExpr* node)
     {
+        //Luau::dump(node);
+        //printf("%s\n", Luau::toJson(node).c_str());
+
         if (AstExprLocal* expr = node->as<AstExprLocal>())
             return locals[expr->local];
         else if (AstExprIndexName* expr = node->as<AstExprIndexName>())
@@ -75,6 +93,15 @@ struct RequireTracer : AstVisitor
             return expr->expr;
         else if (AstExprCall* expr = node->as<AstExprCall>(); expr && expr->self)
             return expr->func->as<AstExprIndexName>()->expr;
+
+        /*else if (AstExprTypeAssertion* expr = node->as<AstExprTypeAssertion>())
+        {
+            if (AstTypeTypeof* possibleTypeof = expr->annotation->as<AstTypeTypeof>())
+            {
+                return possibleTypeof->expr->as<AstExprIndexName>()->expr;
+            }
+        }*/
+
         else
             return nullptr;
     }
