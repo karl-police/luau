@@ -597,6 +597,7 @@ struct InstantiationQueuer : TypeOnceVisitor
 
                 for (auto constraint : solver->constraints)
                 {
+                    // Skip the current processing constraint and the new reduction constraint
                     if (solver->currentConstraintRef == constraint || newConstraint == constraint)
                         continue;
 

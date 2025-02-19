@@ -208,95 +208,16 @@ end
 }
 
 
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "help_this_is_Not_the_REQUIRE_TRACER")
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test_require_tracer_module_tbl")
 {
-    ScopedFastFlag sff[]{
+    /*ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
         {FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
-    };
-
-    fileResolver.source["Module/A"] = R"(
---!strict
-
-type function _safeIs(input: any, isType: any)
-    if typeof(input) ~= "userdata" then return false end
-
-    local is = input.is
-    if not is then return false end
-    return is(input, isType)
-end
-
-type function _arrayToUnion(arr: { any })
-    local arrLength = #arr
-    return if arrLength == 0 then types.never elseif arrLength == 1 then arr[1] else types.unionof(table.unpack(arr))
-end
-
-type function _arrayToIntersection(arr: { any })
-    local arrLength = #arr
-    return if arrLength == 0 then types.never elseif arrLength == 1 then arr[1] else types.intersectionof(table.unpack(arr))
-end
-
-type function _tableMap(input: { any }, fn: (item: any, idx: number) -> ...any)
-    local output = table.create(#input)
-    for idx, item in input do output[idx] = fn(item, idx) end
-    return output
-end
-
-type function _safeValue(input: any)
-    if _safeIs(input, "singleton") then return input:value() end
-    return input
-end
-
-type function _toPascal(input: string)
-    return types.singleton(string.upper(string.sub(input, 1, 1))..string.sub(input, 2, -1))
-end
-
-export type function StringToPascal(input: string)
-    if _safeIs(input, "union") then return _arrayToUnion(_tableMap(input:components(), StringToPascal)) end
-    if _safeIs(input, "intersection") then return _arrayToIntersection(_tableMap(input:components(), StringToPascal)) end
-
-    input = _safeValue(input)
-    if typeof(input) ~= "string" then return input end
-
-    return _toPascal(input)
-end
-
-
-
-return nil
-    )";
-
-
-    fileResolver.source["Module/B"] = R"(
-    local T = require(script.Parent.A)
-
-    local a: T.StringToPascal<"hello">
-    )";
-
-    //CheckResult check2 = frontend.check("Module/A");
-    CheckResult check1 = frontend.check("Module/B");
-
-    auto typeTest = requireType("Module/B", "a");
-
-    // auto type1 = requireType("test");
-    // auto ac = autocomplete('1');
-}
-
-
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test_module")
-{
-    ScopedFastFlag sff[]{
-        {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        {FFlag::DebugLuauLogSolverGenerator, true},
-        {FFlag::DebugLuauLogBindings, true},
-        //{FFlag::DebugLuauLogSolverToJson, true}
-    };
+    };*/
 
     fileResolver.source["Module/A"] = R"(
 local module = {}
@@ -424,6 +345,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
         {FFlag::DebugLuauLogBindings, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
 

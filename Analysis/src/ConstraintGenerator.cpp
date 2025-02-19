@@ -25,6 +25,10 @@
 #include "Luau/Unifier2.h"
 #include "Luau/VisitType.h"
 
+// CUSTOM-2 for TESTING
+#include "Luau/Transpiler.h"
+#include "Luau/AstJsonEncoder.h"
+
 #include <algorithm>
 #include <memory>
 
@@ -258,7 +262,7 @@ void ConstraintGenerator::visitModuleRoot(AstStatBlock* block)
     // CUSTOM-2
     if (FFlag::DebugLuauLogSolverGenerator)
     {
-        printf("Starting ConstraintGenerator - visitModuleRoot\n\n");
+        printf("\nStarting ConstraintGenerator - visitModuleRoot\n");
     }
 
     ControlFlow cf = visitBlockWithoutChildScope(scope, block);
@@ -1083,10 +1087,18 @@ ControlFlow ConstraintGenerator::visitBlockWithoutChildScope_DEPRECATED(const Sc
 // The next vital function to begin the ConstraintGenerator.
 ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
 {
+    // CUSTOM-2
     if (FFlag::DebugLuauLogSolverGenerator)
     {
+        // Could eventually fix the lines equally with RegEx.
         
-    } // CUSTOM-2
+        printf(
+            "\n" "\033[0;38;2;120;255;120m\033[48;2;20;25;20m" "Visiting AstStat:" "\033[K\033[K\033[39m" "\n"
+            "%s" "\033[0m" "\n\n",
+
+            Luau::toString(stat).c_str()
+        );
+    }
 
     RecursionLimiter limiter{&recursionCount, FInt::LuauCheckRecursionLimit};
 
@@ -3715,11 +3727,16 @@ TypeId ConstraintGenerator::resolveType(const ScopePtr& scope, AstType* ty, bool
 
     module->astResolvedTypes[ty] = result;
 
+    // CUSTOM-2
     if (FFlag::DebugLuauLogSolverGenerator)
     {
-        printf("Resolved:" "\n\t");
-        dump(result); // this does the line break
-    } // CUSTOM-2
+        printf(
+            "\033[38;2;255;100;255m"
+            "resolveType:" "\n\t"
+        );
+        dump(result); // this does a line break as well
+        printf("\033[0m" "\n");
+    }
 
     return result;
 }

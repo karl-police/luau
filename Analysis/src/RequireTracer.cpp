@@ -24,16 +24,6 @@ struct RequireTracer : AstVisitor
 
     bool visit(AstExprTypeAssertion* expr) override
     {
-        /*Luau::dump(expr);
-        printf(
-            "%s\n", Luau::toJson(expr).c_str()
-        );*/
-
-        /*if (AstTypeTypeof* possibleTypeof = expr->annotation->as<AstTypeTypeof>())
-        {
-            return true;
-        }*/
-
         // suppress `require() :: any`
         return false;
     }
@@ -94,13 +84,13 @@ struct RequireTracer : AstVisitor
         else if (AstExprCall* expr = node->as<AstExprCall>(); expr && expr->self)
             return expr->func->as<AstExprIndexName>()->expr;
 
-        /*else if (AstExprTypeAssertion* expr = node->as<AstExprTypeAssertion>())
+        else if (AstExprTypeAssertion* expr = node->as<AstExprTypeAssertion>())
         {
             if (AstTypeTypeof* possibleTypeof = expr->annotation->as<AstTypeTypeof>())
             {
-                return possibleTypeof->expr->as<AstExprIndexName>()->expr;
+                return possibleTypeof->expr;
             }
-        }*/
+        }
 
         else
             return nullptr;
@@ -134,10 +124,18 @@ struct RequireTracer : AstVisitor
 
             if (AstExpr* dep = getDependent(expr))
             {
+                /*printf("\nThis expression: ");
+                Luau::dump(expr);
+                printf("\nReturned this from getDependent()\n");
+                Luau::dump(dep);
+                printf("\n\n==NEXT==\n");*/
+
                 const ModuleInfo* context = result.exprs.find(dep);
 
                 // locals just inherit their dependent context, no resolution required
                 if (expr->is<AstExprLocal>())
+                    info = context ? std::optional<ModuleInfo>(*context) : std::nullopt;
+                else if(expr->is<AstExprTypeAssertion>())
                     info = context ? std::optional<ModuleInfo>(*context) : std::nullopt;
                 else
                     info = fileResolver->resolveModule(context, expr);

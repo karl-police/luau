@@ -89,10 +89,33 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "trace_local")
     CHECK_EQ("workspace", result.exprs[workspace].name);
 }
 
+TEST_CASE_FIXTURE(RequireTracerFixture, "trace_transitive_typeof2")
+{
+    AstStatBlock* block = parse(R"(
+        local path_Foo = workspace.Foo
+        local path_Bar = path_Foo.Bar :: typeof(path_Foo.Bar2)
+
+        local m = path_Bar.Baz
+        local n = m.Quux
+        require(n)
+    )");
+
+    //REQUIRE_EQ(3, block->body.size);
+
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+
+    AstStatLocal* local = block->body.data[1]->as<AstStatLocal>();
+    REQUIRE(local);
+    REQUIRE_EQ(1, local->vars.size);
+
+    REQUIRE(result.exprs.contains(local->values.data[0]));
+    //CHECK_EQ("workspace/Foo/Bar2/Baz/Quux", result.exprs[local->values.data[0]].name);
+}
+
 TEST_CASE_FIXTURE(RequireTracerFixture, "trace_transitive_typeof1")
 {
     AstStatBlock* block = parse(R"(
-        local m = workspace.Foo.Bar.Baz --:: typeof(workspace.Foo.Bar2.Baz)
+        local m = workspace.Foo.Bar.Baz :: typeof(workspace.Foo.Bar2.Baz)
         local n = m.Quux
         require(n)
     )");
