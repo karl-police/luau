@@ -17,6 +17,7 @@ target_sources(Luau.Ast PRIVATE
     Ast/include/Luau/Allocator.h
     Ast/include/Luau/Ast.h
     Ast/include/Luau/Confusables.h
+    Ast/include/Luau/Cst.h
     Ast/include/Luau/Lexer.h
     Ast/include/Luau/Location.h
     Ast/include/Luau/ParseOptions.h
@@ -28,6 +29,7 @@ target_sources(Luau.Ast PRIVATE
     Ast/src/Allocator.cpp
     Ast/src/Ast.cpp
     Ast/src/Confusables.cpp
+    Ast/src/Cst.cpp
     Ast/src/Lexer.cpp
     Ast/src/Location.cpp
     Ast/src/Parser.cpp
@@ -78,6 +80,7 @@ target_sources(Luau.CodeGen PRIVATE
     CodeGen/include/Luau/CodeBlockUnwind.h
     CodeGen/include/Luau/CodeGen.h
     CodeGen/include/Luau/CodeGenCommon.h
+    CodeGen/include/Luau/CodeGenOptions.h
     CodeGen/include/Luau/ConditionA64.h
     CodeGen/include/Luau/ConditionX64.h
     CodeGen/include/Luau/IrAnalysis.h
@@ -89,6 +92,7 @@ target_sources(Luau.CodeGen PRIVATE
     CodeGen/include/Luau/IrUtils.h
     CodeGen/include/Luau/IrVisitUseDef.h
     CodeGen/include/Luau/Label.h
+    CodeGen/include/Luau/LoweringStats.h
     CodeGen/include/Luau/NativeProtoExecData.h
     CodeGen/include/Luau/OperandX64.h
     CodeGen/include/Luau/OptimizeConstProp.h
