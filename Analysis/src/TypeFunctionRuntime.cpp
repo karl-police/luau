@@ -1610,7 +1610,7 @@ static int print(lua_State* L)
         size_t l = 0;
         const char* s = luaL_tolstring(L, i, &l); // convert to string using __tostring et al
         if (i > 1)
-            result.append('\t', 1);
+            result.append(1, '\t');
         result.append(s, l);
         lua_pop(L, 1);
     }
