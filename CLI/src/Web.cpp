@@ -6,7 +6,7 @@
 #include "Luau/Common.h"
 
 // Analysis files
-#include "Frontend.h"
+#include "Luau/Frontend.h"
 #include "Fixture.h"
 
 
