@@ -7,7 +7,7 @@
 
 // Analysis files
 #include "Luau/Frontend.h"
-//#include "Fixture.h"
+#include "Fixture.h"
 
 
 #include <string>
