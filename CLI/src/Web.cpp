@@ -5,6 +5,11 @@
 
 #include "Luau/Common.h"
 
+// Analysis files
+#include "Frontend.h"
+#include "Fixture.h"
+
+
 #include <string>
 
 #include <string.h>
@@ -109,6 +114,40 @@ extern "C" const char* executeScript(const char* source)
 
     // run code + collect error
     result = runCode(L, source);
+
+    return result.empty() ? NULL : result.c_str();
+}
+
+
+
+// Analysis
+
+static std::string runAnalysis(const std::string& source)
+{
+    const std::string result;
+
+    CheckResult checkResult = Luau::Fixture::check(Luau::Mode::Strict, source);
+    for (auto error : checkResult.errors)
+    {
+        result += error.getMessage();
+    }
+
+    return result;
+}
+
+extern "C" const char* executeAnalysis(const char* source)
+{
+    // setup flags
+    for (Luau::FValue<bool>* flag = Luau::FValue<bool>::list; flag; flag = flag->next)
+        if (strncmp(flag->name, "Luau", 4) == 0)
+            flag->value = true;
+
+
+    // static string for caching result (prevents dangling ptr on function exit)
+    static std::string result;
+
+    // run
+    result = runAnalysis(source);
 
     return result.empty() ? NULL : result.c_str();
 }
