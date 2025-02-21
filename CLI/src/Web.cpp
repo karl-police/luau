@@ -122,11 +122,11 @@ extern "C" const char* executeScript(const char* source)
 
 
 // Analysis
-
+/*
 namespace Luau
 {
 
-Fixture fixture{};
+Fixture fixture;
 
 static std::string runAnalysis(const std::string& source)
 {
@@ -160,4 +160,4 @@ extern "C" const char* executeAnalysis(const char* source)
     result = Luau::runAnalysis(source);
 
     return result.empty() ? NULL : result.c_str();
-}
+}*/
