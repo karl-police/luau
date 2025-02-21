@@ -27,7 +27,8 @@
 #include <algorithm>
 #include <utility>
 
-LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverMoreDetails, false); // CUSTOM-1
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverMoreDetails); // CUSTOM-1
+//LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverMoreDetails, false); // CUSTOM-1
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolver)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverIncludeDependencies)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogBindings)
