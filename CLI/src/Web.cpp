@@ -126,7 +126,7 @@ extern "C" const char* executeScript(const char* source)
 namespace Luau
 {
 
-Fixture fixture;
+Fixture fixture{};
 
 static std::string runAnalysis(const std::string& source)
 {
