@@ -137,7 +137,7 @@ static std::string runAnalysis(const std::string& source)
     // Collect errors
     for (auto error : checkResult.errors)
     {
-        strResult += error.getMessage();
+        strResult += toString(error);
     }
 
     return strResult;
