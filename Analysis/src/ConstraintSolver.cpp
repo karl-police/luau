@@ -1878,7 +1878,7 @@ bool ConstraintSolver::tryDispatch(const TableCheckConstraint& c, NotNull<const 
     return true;
 }
 
-bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint)
+bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint, bool force)
 {
     std::optional<TypeId> expectedType = c.expectedType ? std::make_optional<TypeId>(follow(*c.expectedType)) : std::nullopt;
     if (expectedType && (isBlocked(*expectedType) || get<PendingExpansionType>(*expectedType)))
