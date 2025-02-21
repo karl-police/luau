@@ -109,18 +109,6 @@ static std::optional<TypeGuard> matchTypeGuard(const AstExprBinary::Op op, AstEx
     };
 }
 
-static bool matchAssert(const AstExprCall& call)
-{
-    if (call.args.size < 1)
-        return false;
-
-    const AstExprGlobal* funcAsGlobal = call.func->as<AstExprGlobal>();
-    if (!funcAsGlobal || funcAsGlobal->name != "assert")
-        return false;
-
-    return true;
-}
-
 
 // For Debugging
 /*[[maybe_unused]] static void LogGeneratorAddConstraintV(const ScopePtr& scope, const ConstraintV& cV)

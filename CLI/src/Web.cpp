@@ -131,7 +131,7 @@ static std::string runAnalysis(const std::string& source)
 {
     const std::string strResult;
 
-    CheckResult checkResult = fixture.check(Mode::Strict, source, nullptr);
+    CheckResult checkResult = fixture.check(Mode::Strict, source);
 
     // Collect errors
     for (auto error : checkResult.errors)
