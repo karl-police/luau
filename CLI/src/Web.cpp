@@ -159,7 +159,6 @@ struct TestConfigResolver : ConfigResolver
 
 TestFileResolver fileResolver;
 TestConfigResolver configResolver;
-NullModuleResolver moduleResolver;
 FrontendOptions frontendOptions;
 
 CheckResult frontendCheck(Mode mode, const std::string& source, std::optional<FrontendOptions> options)
