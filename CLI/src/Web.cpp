@@ -6,7 +6,7 @@
 #include "Luau/Common.h"
 
 // Analysis files
-#include "Frontend.h"
+#include "Luau/Frontend.h"
 #include "Fixture.h"
 
 
@@ -124,15 +124,17 @@ extern "C" const char* executeScript(const char* source)
 
 static std::string runAnalysis(const std::string& source)
 {
-    const std::string result;
+    const std::string strResult;
 
     CheckResult checkResult = Luau::Fixture::check(Luau::Mode::Strict, source);
+
+    // Collect errors
     for (auto error : checkResult.errors)
     {
-        result += error.getMessage();
+        strResult += error.getMessage();
     }
 
-    return result;
+    return strResult;
 }
 
 extern "C" const char* executeAnalysis(const char* source)
