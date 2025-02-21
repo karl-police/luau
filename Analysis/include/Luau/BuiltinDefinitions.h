@@ -86,7 +86,7 @@ TypeId getGlobalBinding(GlobalTypes& globals, const std::string& name);
 
 bool matchSetMetatable(const AstExprCall& call);
 bool matchTableFreeze(const AstExprCall& call);
-bool matchAssert(const AstExprCall& call);
+static bool matchAssert(const AstExprCall& call);
 
 // Returns `true` if the function should introduce typestate for its first argument.
 bool shouldTypestateForFirstArgument(const AstExprCall& call);
