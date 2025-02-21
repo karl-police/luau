@@ -588,3 +588,9 @@ if(TARGET Luau.Bytecode.CLI)
     target_sources(Luau.Bytecode.CLI PRIVATE
         CLI/src/Bytecode.cpp)
 endif()
+
+if(TARGET Luau.CustomTesting.CLI)
+    # Luau.Bytecode.CLI Sources
+    target_sources(Luau.CustomTesting.CLI PRIVATE
+        CLI/src/CustomTesting.cpp)
+endif()

@@ -48,6 +48,9 @@ if(LUAU_BUILD_CLI)
     set_target_properties(Luau.Reduce.CLI PROPERTIES OUTPUT_NAME luau-reduce)
     set_target_properties(Luau.Compile.CLI PROPERTIES OUTPUT_NAME luau-compile)
     set_target_properties(Luau.Bytecode.CLI PROPERTIES OUTPUT_NAME luau-bytecode)
+
+    add_executable(Luau.CustomTesting.CLI)
+    set_target_properties(Luau.CustomTesting.CLI PROPERTIES OUTPUT_NAME luau-customTesting)
 endif()
 
 if(LUAU_BUILD_TESTS)
@@ -231,6 +234,9 @@ if(LUAU_BUILD_CLI)
     target_link_libraries(Luau.Compile.CLI PRIVATE Luau.Compiler Luau.VM Luau.CodeGen Luau.CLI.lib)
 
     target_link_libraries(Luau.Bytecode.CLI PRIVATE Luau.Compiler Luau.VM Luau.CodeGen Luau.CLI.lib)
+
+    target_compile_options(Luau.CustomTesting.CLI PRIVATE ${LUAU_OPTIONS})
+    target_link_libraries(Luau.CustomTesting.CLI PRIVATE Luau.Compiler Luau.VM Luau.Common Luau.CLI.lib Luau.Ast Luau.Analysis)
 endif()
 
 if(LUAU_BUILD_TESTS)
@@ -259,13 +265,13 @@ endif()
 
 if(LUAU_BUILD_WEB)
     target_compile_options(Luau.Web PRIVATE ${LUAU_OPTIONS})
-    target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM)
-    #target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM Luau.Analysis Luau.Config)
+    #target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM)
+    target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM Luau.Analysis)
     #target_include_directories(Luau.Web PRIVATE tests extern)
 
     # declare exported functions to emscripten
-    target_link_options(Luau.Web PRIVATE -sEXPORTED_FUNCTIONS=['_executeScript'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'])
-    #target_link_options(Luau.Web PRIVATE -sEXPORTED_FUNCTIONS=['_executeScript', '_executeAnalysis'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'])
+    #target_link_options(Luau.Web PRIVATE -sEXPORTED_FUNCTIONS=['_executeScript'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'])
+    target_link_options(Luau.Web PRIVATE -sEXPORTED_FUNCTIONS=['_executeScript','_executeAnalysis'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'])
 
     # add -fexceptions for emscripten to allow exceptions to be caught in C++
     target_link_options(Luau.Web PRIVATE -fexceptions)
