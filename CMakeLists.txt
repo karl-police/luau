@@ -261,6 +261,7 @@ if(LUAU_BUILD_WEB)
     target_compile_options(Luau.Web PRIVATE ${LUAU_OPTIONS})
     #target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM)
     target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM Luau.Analysis Luau.Config)
+    target_include_directories(Luau.Web PRIVATE tests)
 
     # declare exported functions to emscripten
     target_link_options(Luau.Web PRIVATE -sEXPORTED_FUNCTIONS=['_executeScript'] -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'])
