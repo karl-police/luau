@@ -8,6 +8,7 @@
 // Analysis files
 #include "Luau/Frontend.h"
 #include "Fixture.h"
+#include <optional>
 
 
 #include <string>
@@ -131,7 +132,7 @@ static std::string runAnalysis(const std::string& source)
 {
     const std::string strResult;
 
-    CheckResult checkResult = fixture.check(Mode::Strict, source);
+    CheckResult checkResult = fixture.check(Mode::Strict, source, std::nullopt);
 
     // Collect errors
     for (auto error : checkResult.errors)
