@@ -39,7 +39,7 @@ LUAU_FASTFLAGVARIABLE(LuauAllowNilAssignmentToIndexer)
 LUAU_FASTFLAG(LuauTrackInteriorFreeTypesOnScope)
 LUAU_FASTFLAGVARIABLE(LuauAlwaysFillInFunctionCallDiscriminantTypes)
 LUAU_FASTFLAGVARIABLE(LuauTrackInteriorFreeTablesOnScope)
-LUAU_FASTFLAGVARIABLE(LuauPrecalculateMutatedFreeTypes)
+LUAU_FASTFLAGVARIABLE(LuauPrecalculateMutatedFreeTypes2)
 
 namespace Luau
 {
@@ -650,13 +650,27 @@ ConstraintSolver::ConstraintSolver(
     {
         unsolvedConstraints.emplace_back(c);
 
-        // initialize the reference counts for the free types in this constraint.
-        for (auto ty : c->getMaybeMutatedFreeTypes())
+        if (FFlag::LuauPrecalculateMutatedFreeTypes2)
         {
-            // increment the reference count for `ty`
-            auto [refCount, _] = unresolvedConstraints.try_insert(ty, 0);
-            refCount += 1;
+            auto maybeMutatedTypesPerConstraint = c->getMaybeMutatedFreeTypes();
+            for (auto ty : maybeMutatedTypesPerConstraint)
+            {
+                auto [refCount, _] = unresolvedConstraints.try_insert(ty, 0);
+                refCount += 1;
+            }
+            maybeMutatedFreeTypes.emplace(c, maybeMutatedTypesPerConstraint);
         }
+        else
+        {
+            // initialize the reference counts for the free types in this constraint.
+            for (auto ty : c->getMaybeMutatedFreeTypes())
+            {
+                // increment the reference count for `ty`
+                auto [refCount, _] = unresolvedConstraints.try_insert(ty, 0);
+                refCount += 1;
+            }
+        }
+
 
         for (NotNull<const Constraint> dep : c->dependencies)
         {
@@ -772,23 +786,29 @@ void ConstraintSolver::run()
                 unblock(c);
                 unsolvedConstraints.erase(unsolvedConstraints.begin() + ptrdiff_t(i));
 
-                if (FFlag::LuauPrecalculateMutatedFreeTypes)
+                if (FFlag::LuauPrecalculateMutatedFreeTypes2)
                 {
-                    for (auto ty : c->getMaybeMutatedFreeTypes())
-                        mutatedFreeTypes->insert(ty);
-                    for (auto ty : *mutatedFreeTypes)
+                    const auto maybeMutated = maybeMutatedFreeTypes.find(c);
+                    if (maybeMutated != maybeMutatedFreeTypes.end())
                     {
-                        size_t& refCount = unresolvedConstraints[ty];
-                        if (refCount > 0)
-                            refCount -= 1;
+                        for (auto ty : maybeMutated->second)
+                        {
+                            // There is a high chance that this type has been rebound
+                            // across blocked types, rebound free types, pending
+                            // expansion types, etc, so we need to follow it.
+                            ty = follow(ty);
+                            size_t& refCount = unresolvedConstraints[ty];
+                            if (refCount > 0)
+                                refCount -= 1;
 
-                        // We have two constraints that are designed to wait for the
-                        // refCount on a free type to be equal to 1: the
-                        // PrimitiveTypeConstraint and ReduceConstraint. We
-                        // therefore wake any constraint waiting for a free type's
-                        // refcount to be 1 or 0.
-                        if (refCount <= 1)
-                            unblock(ty, Location{});
+                            // We have two constraints that are designed to wait for the
+                            // refCount on a free type to be equal to 1: the
+                            // PrimitiveTypeConstraint and ReduceConstraint. We
+                            // therefore wake any constraint waiting for a free type's
+                            // refcount to be 1 or 0.
+                            if (refCount <= 1)
+                                unblock(ty, Location{});
+                        }
                     }
                 }
                 else
@@ -988,6 +1008,8 @@ bool ConstraintSolver::tryDispatch(NotNull<const Constraint> constraint, bool fo
         success = tryDispatch(*fcc, constraint);
     else if (auto fcc = get<FunctionCheckConstraint>(*constraint))
         success = tryDispatch(*fcc, constraint);
+    else if (auto tcc = get<TableCheckConstraint>(*constraint))
+        success = tryDispatch(*tcc, constraint);
     else if (auto fcc = get<PrimitiveTypeConstraint>(*constraint))
         success = tryDispatch(*fcc, constraint, force);
     else if (auto hpc = get<HasPropConstraint>(*constraint))
@@ -1490,10 +1512,7 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
     return false;
 }
 
-void ConstraintSolver::fillInDiscriminantTypes(
-    NotNull<const Constraint> constraint,
-    const std::vector<std::optional<TypeId>>& discriminantTypes
-)
+void ConstraintSolver::fillInDiscriminantTypes(NotNull<const Constraint> constraint, const std::vector<std::optional<TypeId>>& discriminantTypes)
 {
     for (std::optional<TypeId> ty : discriminantTypes)
     {
@@ -1841,7 +1860,29 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
     return true;
 }
 
-bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint, bool force)
+bool ConstraintSolver::tryDispatch(const TableCheckConstraint& c, NotNull<const Constraint> constraint)
+{
+    // This is expensive as we need to traverse a (potentially large)
+    // literal up front in order to determine if there are any blocked
+    // types, otherwise we may run `matchTypeLiteral` multiple times,
+    // which right now may fail due to being non-idempotent (it
+    // destructively updates the underlying literal type).
+    auto blockedTypes = findBlockedTypesIn(c.table, c.astTypes);
+    for (const auto ty : blockedTypes)
+    {
+        block(ty, constraint);
+    }
+    if (!blockedTypes.empty())
+        return false;
+
+    Unifier2 u2{arena, builtinTypes, constraint->scope, NotNull{&iceReporter}};
+    std::vector<TypeId> toBlock;
+    (void)matchLiteralType(c.astTypes, c.astExpectedTypes, builtinTypes, arena, NotNull{&u2}, c.expectedType, c.exprType, c.table, toBlock);
+    LUAU_ASSERT(toBlock.empty());
+    return true;
+}
+
+bool ConstraintSolver::tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint)
 {
     std::optional<TypeId> expectedType = c.expectedType ? std::make_optional<TypeId>(follow(*c.expectedType)) : std::nullopt;
     if (expectedType && (isBlocked(*expectedType) || get<PendingExpansionType>(*expectedType)))

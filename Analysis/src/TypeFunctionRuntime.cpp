@@ -13,8 +13,11 @@
 #include <set>
 #include <vector>
 
+LUAU_FASTFLAGVARIABLE(LuauTypeFunFixHydratedClasses)
 LUAU_DYNAMIC_FASTINT(LuauTypeFunctionSerdeIterationLimit)
+LUAU_FASTFLAGVARIABLE(LuauTypeFunSingletonEquality)
 LUAU_FASTFLAGVARIABLE(LuauUserTypeFunTypeofReturnsType)
+LUAU_FASTFLAGVARIABLE(LuauTypeFunPrintFix)
 
 namespace Luau
 {
@@ -1565,7 +1568,7 @@ void registerTypeUserData(lua_State* L)
 
     // Create and register metatable for type userdata
     luaL_newmetatable(L, "type");
-    
+
     if (FFlag::LuauUserTypeFunTypeofReturnsType)
     {
         lua_pushstring(L, "type");
@@ -1610,7 +1613,12 @@ static int print(lua_State* L)
         size_t l = 0;
         const char* s = luaL_tolstring(L, i, &l); // convert to string using __tostring et al
         if (i > 1)
-            result.append(1, '\t');
+        {
+            if (FFlag::LuauTypeFunPrintFix)
+                result.append(1, '\t');
+            else
+                result.append('\t', 1);
+        }
         result.append(s, l);
         lua_pop(L, 1);
     }
@@ -1702,14 +1710,14 @@ bool areEqual(SeenSet& seen, const TypeFunctionSingletonType& lhs, const TypeFun
 
     {
         const TypeFunctionBooleanSingleton* lp = get<TypeFunctionBooleanSingleton>(&lhs);
-        const TypeFunctionBooleanSingleton* rp = get<TypeFunctionBooleanSingleton>(&lhs);
+        const TypeFunctionBooleanSingleton* rp = get<TypeFunctionBooleanSingleton>(FFlag::LuauTypeFunSingletonEquality ? &rhs : &lhs);
         if (lp && rp)
             return lp->value == rp->value;
     }
 
     {
         const TypeFunctionStringSingleton* lp = get<TypeFunctionStringSingleton>(&lhs);
-        const TypeFunctionStringSingleton* rp = get<TypeFunctionStringSingleton>(&lhs);
+        const TypeFunctionStringSingleton* rp = get<TypeFunctionStringSingleton>(FFlag::LuauTypeFunSingletonEquality ? &rhs : &lhs);
         if (lp && rp)
             return lp->value == rp->value;
     }
@@ -1862,7 +1870,10 @@ bool areEqual(SeenSet& seen, const TypeFunctionClassType& lhs, const TypeFunctio
     if (seenSetContains(seen, &lhs, &rhs))
         return true;
 
-    return lhs.name == rhs.name;
+    if (FFlag::LuauTypeFunFixHydratedClasses)
+        return lhs.classTy == rhs.classTy;
+    else
+        return lhs.name_DEPRECATED == rhs.name_DEPRECATED;
 }
 
 bool areEqual(SeenSet& seen, const TypeFunctionType& lhs, const TypeFunctionType& rhs)
