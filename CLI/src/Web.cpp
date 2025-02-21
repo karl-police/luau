@@ -149,6 +149,123 @@ struct TestFileResolver
     std::unordered_map<ModuleName, std::string> environments;
 };
 
+std::optional<ModuleInfo> TestFileResolver::resolveModuleInfo(const ModuleName& currentModuleName, const AstExpr& pathExpr)
+{
+    if (auto name = pathExprToModuleName(currentModuleName, pathExpr))
+        return {{*name, false}};
+
+    return std::nullopt;
+}
+
+const ModulePtr TestFileResolver::getModule(const ModuleName& moduleName) const
+{
+    LUAU_ASSERT(false);
+    return nullptr;
+}
+
+bool TestFileResolver::moduleExists(const ModuleName& moduleName) const
+{
+    auto it = source.find(moduleName);
+    return (it != source.end());
+}
+
+std::optional<SourceCode> TestFileResolver::readSource(const ModuleName& name)
+{
+    auto it = source.find(name);
+    if (it == source.end())
+        return std::nullopt;
+
+    SourceCode::Type sourceType = SourceCode::Module;
+
+    auto it2 = sourceTypes.find(name);
+    if (it2 != sourceTypes.end())
+        sourceType = it2->second;
+
+    return SourceCode{it->second, sourceType};
+}
+
+std::optional<ModuleInfo> TestFileResolver::resolveModule(const ModuleInfo* context, AstExpr* expr)
+{
+    if (AstExprGlobal* g = expr->as<AstExprGlobal>())
+    {
+        if (g->name == "game")
+            return ModuleInfo{"game"};
+        if (g->name == "workspace")
+            return ModuleInfo{"workspace"};
+        if (g->name == "script")
+            return context ? std::optional<ModuleInfo>(*context) : std::nullopt;
+    }
+    else if (AstExprIndexName* i = expr->as<AstExprIndexName>(); i && context)
+    {
+        if (i->index == "Parent")
+        {
+            std::string_view view = context->name;
+            size_t lastSeparatorIndex = view.find_last_of('/');
+
+            if (lastSeparatorIndex == std::string_view::npos)
+                return std::nullopt;
+
+            return ModuleInfo{ModuleName(view.substr(0, lastSeparatorIndex)), context->optional};
+        }
+        else
+        {
+            return ModuleInfo{context->name + '/' + i->index.value, context->optional};
+        }
+    }
+    else if (AstExprIndexExpr* i = expr->as<AstExprIndexExpr>(); i && context)
+    {
+        if (AstExprConstantString* index = i->index->as<AstExprConstantString>())
+        {
+            return ModuleInfo{context->name + '/' + std::string(index->value.data, index->value.size), context->optional};
+        }
+    }
+    else if (AstExprCall* call = expr->as<AstExprCall>(); call && call->self && call->args.size >= 1 && context)
+    {
+        if (AstExprConstantString* index = call->args.data[0]->as<AstExprConstantString>())
+        {
+            AstName func = call->func->as<AstExprIndexName>()->index;
+
+            if (func == "GetService" && context->name == "game")
+                return ModuleInfo{"game/" + std::string(index->value.data, index->value.size)};
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::string TestFileResolver::getHumanReadableModuleName(const ModuleName& name) const
+{
+    // We have a handful of tests that need to distinguish between a canonical
+    // ModuleName and the human-readable version so we apply a simple transform
+    // here:  We replace all slashes with dots.
+    std::string result = name;
+    for (size_t i = 0; i < result.size(); ++i)
+    {
+        if (result[i] == '/')
+            result[i] = '.';
+    }
+
+    return result;
+}
+
+std::optional<std::string> TestFileResolver::getEnvironmentForModule(const ModuleName& name) const
+{
+    auto it = environments.find(name);
+    if (it != environments.end())
+        return it->second;
+
+    return std::nullopt;
+}
+
+const Config& TestConfigResolver::getConfig(const ModuleName& name) const
+{
+    auto it = configFiles.find(name);
+    if (it != configFiles.end())
+        return it->second;
+
+    return defaultConfig;
+}
+
 struct TestConfigResolver : ConfigResolver
 {
     Config defaultConfig;
