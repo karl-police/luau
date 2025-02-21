@@ -130,7 +130,7 @@ Fixture fixture;
 
 static std::string runAnalysis(const std::string& source)
 {
-    const std::string strResult;
+    std::string strResult;
 
     CheckResult checkResult = fixture.check(Mode::Strict, source, std::nullopt);
 
