@@ -122,6 +122,10 @@ extern "C" const char* executeScript(const char* source)
 
 // Analysis
 
+namespace Luau
+{
+
+
 struct TestFileResolver
     : FileResolver
     , ModuleResolver
@@ -205,6 +209,8 @@ static std::string runAnalysis(const std::string& source)
     return strResult;
 }
 
+} // namespace Luau
+
 extern "C" const char* executeAnalysis(const char* source)
 {
     // setup flags
@@ -217,7 +223,7 @@ extern "C" const char* executeAnalysis(const char* source)
     static std::string result;
 
     // run
-    result = runAnalysis(source);
+    result = Luau::runAnalysis(source);
 
     return result.empty() ? NULL : result.c_str();
 }
