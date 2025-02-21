@@ -259,8 +259,8 @@ endif()
 
 if(LUAU_BUILD_WEB)
     target_compile_options(Luau.Web PRIVATE ${LUAU_OPTIONS})
-    #target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM)
-    target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM Luau.Analysis Luau.Config)
+    target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM)
+    #target_link_libraries(Luau.Web PRIVATE Luau.Compiler Luau.VM Luau.Analysis Luau.Config)
     #target_include_directories(Luau.Web PRIVATE tests extern)
 
     # declare exported functions to emscripten
