@@ -125,80 +125,11 @@ extern "C" const char* executeScript(const char* source)
 namespace Luau
 {
 
-
-struct TestFileResolver
-    : FileResolver
-    , ModuleResolver
-{
-    std::optional<ModuleInfo> resolveModuleInfo(const ModuleName& currentModuleName, const AstExpr& pathExpr) override;
-
-    const ModulePtr getModule(const ModuleName& moduleName) const override;
-
-    bool moduleExists(const ModuleName& moduleName) const override;
-
-    std::optional<SourceCode> readSource(const ModuleName& name) override;
-
-    std::optional<ModuleInfo> resolveModule(const ModuleInfo* context, AstExpr* expr) override;
-
-    std::string getHumanReadableModuleName(const ModuleName& name) const override;
-
-    std::optional<std::string> getEnvironmentForModule(const ModuleName& name) const override;
-
-    std::unordered_map<ModuleName, std::string> source;
-    std::unordered_map<ModuleName, SourceCode::Type> sourceTypes;
-    std::unordered_map<ModuleName, std::string> environments;
-};
-
-struct TestConfigResolver : ConfigResolver
-{
-    Config defaultConfig;
-    std::unordered_map<ModuleName, Config> configFiles;
-
-    const Config& getConfig(const ModuleName& name) const override;
-};
-
-struct NullModuleResolver : ModuleResolver
-{
-    std::optional<ModuleInfo> resolveModuleInfo(const ModuleName& currentModuleName, const AstExpr& pathExpr) override
-    {
-        return std::nullopt;
-    }
-    const ModulePtr getModule(const ModuleName& moduleName) const override
-    {
-        return nullptr;
-    }
-    bool moduleExists(const ModuleName& moduleName) const override
-    {
-        return false;
-    }
-    std::string getHumanReadableModuleName(const ModuleName& moduleName) const override
-    {
-        return moduleName;
-    }
-};
-
-Frontend frontend;
-TestFileResolver fileResolver;
-TestConfigResolver configResolver;
-NullModuleResolver moduleResolver;
-
-CheckResult frontendCheck(Mode mode, const std::string& source, std::optional<FrontendOptions> options)
-{
-    ModuleName mm = fromString(mainModuleName);
-    configResolver.defaultConfig.mode = mode;
-    fileResolver.source[mm] = std::move(source);
-    frontend.markDirty(mm);
-
-    CheckResult result = frontend.check(mm, options);
-
-    return result;
-}
-
 static std::string runAnalysis(const std::string& source)
 {
     const std::string strResult;
 
-    CheckResult checkResult = frontendCheck(Luau::Mode::Strict, source);
+    CheckResult checkResult = Fixture::check(Mode::Strict, source);
 
     // Collect errors
     for (auto error : checkResult.errors)
