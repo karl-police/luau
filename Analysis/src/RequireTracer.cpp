@@ -134,7 +134,7 @@ struct RequireTracer : AstVisitor
             // push all dependent expressions to the work stack; note that the vector is modified during traversal
             for (size_t i = 0; i < work.size(); ++i)
             {
-                /*printf("\nThis expression: ");
+                /*printf("\nDEPENDENCY PUSHING This expression: ");
                 Luau::dump(expr);
                 printf("\nReturned this from getDependent()\n");
                 Luau::dump(dep);
@@ -148,6 +148,12 @@ struct RequireTracer : AstVisitor
             for (size_t i = work.size(); i > 0; --i)
             {
                 AstNode* expr = work[i - 1];
+
+                /*printf("\nThis expression: ");
+                Luau::dump(expr);
+                printf("\nReturned this from getDependent()\n");
+                Luau::dump(dep);
+                printf("\n\n==NEXT==\n");*/
 
                 // when multiple expressions depend on the same one we push it to work queue multiple times
                 if (result.exprs.contains(expr))
