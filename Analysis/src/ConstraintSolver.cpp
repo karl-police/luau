@@ -773,10 +773,6 @@ void ConstraintSolver::run()
             // Set current Constraint
             //currentConstraintRef = c.get(); // CUSTOM-4
 
-            std::optional<DenseHashSet<TypeId>> mutatedFreeTypes = std::nullopt;
-            if (FFlag::LuauPrecalculateMutatedFreeTypes)
-                mutatedFreeTypes = c->getMaybeMutatedFreeTypes();
-
             bool success = tryDispatch(c, force);
 
             progress |= success;
