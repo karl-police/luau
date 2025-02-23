@@ -73,7 +73,9 @@ size_t HashBlockedConstraintId::operator()(const BlockedConstraintId& bci) const
 }
 
 // Log Function for block()
-[[maybe_unused]] static void LogSolverBlockAction(BlockedConstraintId bci, NotNull<const Constraint> constraint)
+[[maybe_unused]] static void LogSolverBlockAction(
+    BlockedConstraintId bci, NotNull<const Constraint> constraint
+)
 {
     // The depends on at the right is the "target".
 
@@ -95,9 +97,27 @@ size_t HashBlockedConstraintId::operator()(const BlockedConstraintId& bci) const
         LUAU_ASSERT(!"Should be unreachable");
 }
 
-[[maybe_unused]] static void LogSolverUnblockAction(BlockedConstraintId bci, NotNull<const Constraint> constraint)
+// Supposed to log unblock_()
+[[maybe_unused]] static void LogSolverUnblockAction(BlockedConstraintId bci)
 {
-    
+    /*printf("\033[38;2;160;90;0m!! Unblock Action !!\033[0m");
+
+    const auto logText = "\n\t%s\n\n";
+
+    if (auto ty = get_if<TypeId>(&bci))
+    {
+        printf(logText, toString(*ty).c_str());
+    }
+    else if (auto tyPackId = (get_if<TypePackId>(&bci)))
+    {
+        printf(logText, toString(*tyPackId).c_str());
+    }
+    else if (auto blockedConstraint = *(get_if<const Constraint*>(&bci)))
+    {
+        printf(logText, toString(*blockedConstraint).c_str());
+    }
+    else
+        LUAU_ASSERT(!"Should be unreachable");*/
 }
 
 
@@ -734,7 +754,8 @@ void ConstraintSolver::run()
                 if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
                 {
                     printf(
-                        "\033[38;2;50;50;50m" "Skipped\t%s" "\033[0m" "\n",
+                        "\n" "\033[38;2;55;55;55m" "\033[48;2;14;14;14m"
+                        "Skipped\033[K" "\t%s" "\033[K\033[0m" "\n",
                         toString(*c).c_str()
                     );
                 } // CUSTOM-1
@@ -862,6 +883,20 @@ void ConstraintSolver::run()
             }
             else
                 ++i;
+
+
+            // CUSTOM-1
+            if (FFlag::DebugLuauLogSolver && FFlag::DebugLuauLogSolverMoreDetails)
+            {
+                // If not successful
+                if (success == false) {
+                    printf(
+                        "\n" "\033[38;2;170;0;0m" "Dispatch not successful:\033[0m"
+                        "\n\t%s" "\n\n",
+                        toString(*c, opts).c_str()
+                    );
+                }
+            }
 
             if (force && success)
                 return true;
