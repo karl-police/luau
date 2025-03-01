@@ -23,6 +23,7 @@ LUAU_FASTFLAG(DebugLuauLogSolverGenerator)
 LUAU_FASTFLAG(DebugLuauMagicTypes)
 LUAU_FASTFLAG(LuauAutocompleteNewSolverLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
+LUAU_FASTFLAG(DebugLuauLogTypeFamilies)
 
 using namespace Luau;
 
@@ -248,10 +249,10 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "test22")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        {FFlag::DebugLuauLogSolverGenerator, true},
-        {FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true}
     };
 
@@ -272,7 +273,7 @@ local a: {Foo} = {
     // LUAU_REQUIRE_NO_ERRORS(check1);
 
     auto Foo = requireTypeAlias("Foo");
-    auto test1 = toString(check1.errors[0]);
+    //auto test1 = toString(check1.errors[0]);
     auto test2 = requireType("a");
 }
 
@@ -338,6 +339,50 @@ else "Other"
     //auto test2 = toString(check1.errors[1]);
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issue2")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogBindings, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
+        {FFlag::DebugLuauLogTypeFamilies, true},
+        //{FFlag::DebugLuauLogSolverToJson, true},
+    };
+
+    CheckResult result = check(R"(
+        --!strict
+        type function KeyOf(ty)
+            if not ty:is("table") then
+                error("KeyOf only supports operating on table types!")
+            end
+
+            local components = {}
+            for key, _ in ty:properties() do
+                components.insert(key)
+            end
+
+            return types.unionof(table.unpack(components))
+        end
+
+        local PlayerData = {
+            Coins = 0,
+            Level = 1,
+            Exp = 0,
+            MaxExp = 100
+        }
+        type Keys = KeyOf<typeof(PlayerData)>
+        -- This function makes it think that there's going to be a pending expansion
+        local function UpdateData(key: Keys, value)
+            PlayerData[key] = value
+        end
+        UpdateData("Coins", 2)
+    )");
+
+    // LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issue1")
 {
     ScopedFastFlag sff[]{
@@ -346,6 +391,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
         {FFlag::DebugLuauLogSolverMoreDetails, true},
         {FFlag::DebugLuauLogBindings, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
+        {FFlag::DebugLuauLogTypeFamilies, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
 

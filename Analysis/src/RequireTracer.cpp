@@ -10,6 +10,7 @@
 #include "Luau/AstJsonEncoder.h"
 
 LUAU_FASTFLAGVARIABLE(LuauExtendedSimpleRequire)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogRequireTracer)
 
 namespace Luau
 {
@@ -21,6 +22,7 @@ struct RequireTracer : AstVisitor
         , fileResolver(fileResolver)
         , currentModuleName(currentModuleName)
         , locals(nullptr)
+        //, indexTblCache(nullptr)
     {
     }
 
@@ -46,7 +48,7 @@ struct RequireTracer : AstVisitor
         {
             AstLocal* local = stat->vars.data[i];
             AstExpr* expr = stat->values.data[i];
-
+            
             // track initializing expression to be able to trace modules through locals
             locals[local] = expr;
         }
@@ -56,6 +58,9 @@ struct RequireTracer : AstVisitor
 
     bool visit(AstStatAssign* stat) override
     {
+        //Luau::dump(stat);
+        //printf("%s\n\n", Luau::toJson(stat).c_str());
+
         for (size_t i = 0; i < stat->vars.size; ++i)
         {
             // locals that are assigned don't have a known expression
@@ -74,9 +79,6 @@ struct RequireTracer : AstVisitor
 
     AstExpr* getDependent_DEPRECATED(AstExpr* node)
     {
-        //Luau::dump(node);
-        //printf("%s\n", Luau::toJson(node).c_str());
-
         if (AstExprLocal* expr = node->as<AstExprLocal>())
             return locals[expr->local];
         else if (AstExprIndexName* expr = node->as<AstExprIndexName>())
@@ -99,10 +101,37 @@ struct RequireTracer : AstVisitor
     }
     AstNode* getDependent(AstNode* node)
     {
+        /*printf("getDependent() call:\n");
+        Luau::dump(node);
+        printf("%s\n\n", Luau::toJson(node).c_str());*/
+
         if (AstExprLocal* expr = node->as<AstExprLocal>())
             return locals[expr->local];
         else if (AstExprIndexName* expr = node->as<AstExprIndexName>())
+        {
+            /*if (AstExprLocal* localExpr = expr->expr->as<AstExprLocal>())
+            {
+                auto foundExpr = *locals.find(localExpr->local);
+                
+                if (AstExprTable* tblExpr = foundExpr->as<AstExprTable>())
+                    //nullptr check missing
+                    if (auto str = tblExpr->items.data[0].key->as<AstExprConstantString>())
+                    {
+                        auto cha = str->value.data;
+                        if (strcmp(cha, expr->index.value) == 0)
+                        {
+                            indexTblCache[expr->asExpr()] = tblExpr->items.data[0].value;
+                            return tblExpr->items.data[0].value;
+                        }
+                    }
+            }
+            else if (auto findRes = indexTblCache.find(expr->expr); findRes != nullptr)
+            {
+                return *findRes;
+            }*/
+           
             return expr->expr;
+        }
         else if (AstExprIndexExpr* expr = node->as<AstExprIndexExpr>())
             return expr->expr;
         else if (AstExprCall* expr = node->as<AstExprCall>(); expr && expr->self)
@@ -115,10 +144,22 @@ struct RequireTracer : AstVisitor
             return expr->type;
         else if (AstTypeTypeof* expr = node->as<AstTypeTypeof>())
             return expr->expr;
+
+        // Testing
+        //else if (AstExprTable* expr = node->as<AstExprTable>())
+        //    return expr->items.data[0].value;
         else
             return nullptr;
     }
 
+    /*
+        The process() function sets up a work stack with all the args provided to require calls
+        at the bottom and all of their dependencies on the top.
+        That way, as the main loop through the stack progresses (top to bottom),
+        we resolve all these dependencies before we get to the nodes for the require args.
+        (That's why result.exprs.find(dep) is there, if there is a node that we depend on,
+        we should have already processed it and can check the result.exprs cache for the result.)
+    */
     void process()
     {
         ModuleInfo moduleContext{currentModuleName};
@@ -134,26 +175,26 @@ struct RequireTracer : AstVisitor
             // push all dependent expressions to the work stack; note that the vector is modified during traversal
             for (size_t i = 0; i < work.size(); ++i)
             {
-                /*printf("\nDEPENDENCY PUSHING This expression: ");
-                Luau::dump(expr);
-                printf("\nReturned this from getDependent()\n");
-                Luau::dump(dep);
-                printf("\n\n==NEXT==\n");*/
+                //printf("Dependency Check for:\n");
+                //Luau::dump(work[i]);
 
                 if (AstNode* dep = getDependent(work[i]))
+                {
+                    /*printf("\nDEPENDENCY PUSHING This expression: ");
+                    Luau::dump(work[i]);
+                    printf("\nReturned this from getDependent()\n");
+                    Luau::dump(dep);
+                    printf("\n\n==NEXT==\n");*/
+
+
                     work.push_back(dep);
+                }
             }
 
             // resolve all expressions to a module info
             for (size_t i = work.size(); i > 0; --i)
             {
                 AstNode* expr = work[i - 1];
-
-                /*printf("\nThis expression: ");
-                Luau::dump(expr);
-                printf("\nReturned this from getDependent()\n");
-                Luau::dump(dep);
-                printf("\n\n==NEXT==\n");*/
 
                 // when multiple expressions depend on the same one we push it to work queue multiple times
                 if (result.exprs.contains(expr))
@@ -163,6 +204,12 @@ struct RequireTracer : AstVisitor
 
                 if (AstNode* dep = getDependent(expr))
                 {
+                    /*printf("\nThis expression: ");
+                    Luau::dump(expr);
+                    printf("\nReturned this from getDependent()\n");
+                    Luau::dump(dep);
+                    printf("\n\n==NEXT==\n");*/
+
                     const ModuleInfo* context = result.exprs.find(dep);
 
                     if (context && expr->is<AstExprLocal>())
@@ -171,6 +218,11 @@ struct RequireTracer : AstVisitor
                         info = *context; // simple group nodes propagate their value
                     else if (context && (expr->is<AstTypeTypeof>() || expr->is<AstExprTypeAssertion>()))
                         info = *context; // typeof type annotations will resolve to the typeof content
+
+					// Testing
+                    //else if (context && expr->is<AstExprTable>())
+                    //    info = *context;
+
                     else if (AstExpr* asExpr = expr->asExpr())
                         info = fileResolver->resolveModule(context, asExpr);
                 }
@@ -253,6 +305,7 @@ struct RequireTracer : AstVisitor
     ModuleName currentModuleName;
 
     DenseHashMap<AstLocal*, AstExpr*> locals;
+    //DenseHashMap<AstExpr*, AstExpr*> indexTblCache;
     std::vector<AstExpr*> work_DEPRECATED;
     std::vector<AstNode*> work;
     std::vector<AstExprCall*> requireCalls;
