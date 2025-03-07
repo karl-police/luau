@@ -24,6 +24,7 @@ LUAU_FASTFLAG(DebugLuauMagicTypes)
 LUAU_FASTFLAG(LuauAutocompleteNewSolverLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTFLAG(DebugLuauLogTypeFamilies)
+LUAU_FASTFLAG(DebugLuauGreedyGeneralization)
 
 using namespace Luau;
 
@@ -392,6 +393,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
         {FFlag::DebugLuauLogBindings, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
         {FFlag::DebugLuauLogTypeFamilies, true},
+        {FFlag::DebugLuauGreedyGeneralization, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
 
@@ -416,6 +418,43 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
     //LUAU_REQUIRE_NO_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "typefunc_dependency_issue1")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauGreedyGeneralization, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverToJson, true},
+    };
+
+    CheckResult check1 = check(R"(
+local tbl_A = {} :: typeof({entry1 = 1})
+tbl_A.entry1b = "hi"
+
+type tbl_B = {entry2: nil}
+local tbl_C = nil :: getmetatable< typeof( setmetatable({}, {entry3b="abc2"}) ) >
+tbl_C.entry3 = "abc" 
+tbl_C.entry4 = "hi2"
+
+local test = nil :: typeof(tbl_C)
+local tbl_ABC = nil :: typeof(tbl_A) & tbl_B & typeof(tbl_C)
+
+local indexesABC = nil :: keyof<typeof(tbl_ABC)>
+)");
+
+    auto test1 = requireType("indexesABC");
+
+    /*if (auto ty = follow(test1)->ty.get_if<UnionType>())
+    {
+        CHECK_EQ(ty->options.size(), 6);
+    }
+    else
+        LUAU_ASSERT(false); // It should be a UnionType*/
+}
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
 {
     ScopedFastFlag sff[]{
@@ -423,6 +462,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "keyof_mixed_tables")
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauGreedyGeneralization, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
@@ -455,6 +495,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "table_type_test1")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauGreedyGeneralization, true},
         //{FFlag::DebugLuauLogSolver, false},
     };
 

@@ -2871,7 +2871,7 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
                 ctx->ice->ice("tabletype function: first argument is not a valid table state");
                 LUAU_ASSERT(false);
 
-                return {std::nullopt, Reduction::MaybeOk, {}, {}};
+                return {std::nullopt, Reduction::Erroneous, {}, {}};
             }
         }
     }
@@ -2888,7 +2888,8 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     //BlockedType testBlocked = BlockedType{};
     //TypeId newTblTy = ctx->arena->addType(testBlocked);
 
-    return {newTblTy, Reduction::Irreducible, {}, {}};
+    return {std::move(newTblTy), Reduction::MaybeOk, {}, {}};
+    //return {newTblTy, Reduction::Irreducible, {}, {}};
     /*return {ctx->arena->addType(
         TableType({}, TableIndexer{stringType, stringType}, TypeLevel{}, TableState::Unsealed)
     ), false, {}, {}};*/
