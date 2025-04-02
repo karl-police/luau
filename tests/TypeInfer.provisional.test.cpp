@@ -11,14 +11,15 @@
 
 using namespace Luau;
 
-LUAU_FASTFLAG(LuauSolverV2);
-LUAU_FASTFLAG(DebugLuauEqSatSimplification);
-LUAU_FASTFLAG(LuauStoreCSTData);
-LUAU_FASTINT(LuauNormalizeCacheLimit);
-LUAU_FASTINT(LuauTarjanChildLimit);
-LUAU_FASTINT(LuauTypeInferIterationLimit);
-LUAU_FASTINT(LuauTypeInferRecursionLimit);
-LUAU_FASTINT(LuauTypeInferTypePackLoopLimit);
+LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(DebugLuauEqSatSimplification)
+LUAU_FASTFLAG(LuauStoreCSTData2)
+LUAU_FASTINT(LuauNormalizeCacheLimit)
+LUAU_FASTINT(LuauTarjanChildLimit)
+LUAU_FASTINT(LuauTypeInferIterationLimit)
+LUAU_FASTINT(LuauTypeInferRecursionLimit)
+LUAU_FASTINT(LuauTypeInferTypePackLoopLimit)
+LUAU_FASTFLAG(LuauImproveTypePathsInErrors)
 
 TEST_SUITE_BEGIN("ProvisionalTests");
 
@@ -48,7 +49,7 @@ TEST_CASE_FIXTURE(Fixture, "typeguard_inference_incomplete")
         end
     )";
 
-    const std::string expected = FFlag::LuauStoreCSTData ? R"(
+    const std::string expected = FFlag::LuauStoreCSTData2 ? R"(
         function f(a:{fn:()->(a,b...)}): ()
             if type(a) == 'boolean' then
                 local a1:boolean=a
@@ -67,7 +68,7 @@ TEST_CASE_FIXTURE(Fixture, "typeguard_inference_incomplete")
         end
     )";
 
-    const std::string expectedWithNewSolver = FFlag::LuauStoreCSTData ? R"(
+    const std::string expectedWithNewSolver = FFlag::LuauStoreCSTData2 ? R"(
         function f(a:{fn:()->(unknown,...unknown)}): ()
             if type(a) == 'boolean' then
                 local a1:{fn:()->(unknown,...unknown)}&boolean=a
@@ -86,7 +87,7 @@ TEST_CASE_FIXTURE(Fixture, "typeguard_inference_incomplete")
         end
     )";
 
-    const std::string expectedWithEqSat = FFlag::LuauStoreCSTData ? R"(
+    const std::string expectedWithEqSat = FFlag::LuauStoreCSTData2 ? R"(
         function f(a:{fn:()->(unknown,...unknown)}): ()
             if type(a) == 'boolean' then
                 local a1:{fn:()->(unknown,...unknown)}&boolean=a
@@ -873,7 +874,15 @@ TEST_CASE_FIXTURE(Fixture, "assign_table_with_refined_property_with_a_similar_ty
     else
     {
         LUAU_REQUIRE_ERROR_COUNT(1, result);
-        const std::string expected = R"(Type
+        const std::string expected = (FFlag::LuauImproveTypePathsInErrors) ?
+                                                                           R"(Type
+	'{| x: number? |}'
+could not be converted into
+	'{| x: number |}'
+caused by:
+  Property 'x' is not compatible.
+Type 'number?' could not be converted into 'number' in an invariant context)"
+                                                                           : R"(Type
     '{| x: number? |}'
 could not be converted into
     '{| x: number |}'

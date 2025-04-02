@@ -9,8 +9,7 @@
 #include "Luau/Transpiler.h"
 #include "Luau/AstJsonEncoder.h"
 
-LUAU_FASTFLAGVARIABLE(LuauExtendedSimpleRequire)
-LUAU_FASTFLAGVARIABLE(DebugLuauLogRequireTracer)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogRequireTracer) // custom flag
 
 namespace Luau
 {
@@ -164,119 +163,70 @@ struct RequireTracer : AstVisitor
     {
         ModuleInfo moduleContext{currentModuleName};
 
-        if (FFlag::LuauExtendedSimpleRequire)
+        // seed worklist with require arguments
+        work.reserve(requireCalls.size());
+
+        for (AstExprCall* require : requireCalls)
+            work.push_back(require->args.data[0]);
+
+        // push all dependent expressions to the work stack; note that the vector is modified during traversal
+        for (size_t i = 0; i < work.size(); ++i)
         {
-            // seed worklist with require arguments
-            work.reserve(requireCalls.size());
+			//printf("Dependency Check for:\n");
+			//Luau::dump(work[i]);
 
-            for (AstExprCall* require : requireCalls)
-                work.push_back(require->args.data[0]);
-
-            // push all dependent expressions to the work stack; note that the vector is modified during traversal
-            for (size_t i = 0; i < work.size(); ++i)
-            {
-                //printf("Dependency Check for:\n");
-                //Luau::dump(work[i]);
-
-                if (AstNode* dep = getDependent(work[i]))
-                {
-                    /*printf("\nDEPENDENCY PUSHING This expression: ");
-                    Luau::dump(work[i]);
-                    printf("\nReturned this from getDependent()\n");
-                    Luau::dump(dep);
-                    printf("\n\n==NEXT==\n");*/
-
-
-                    work.push_back(dep);
-                }
-            }
-
-            // resolve all expressions to a module info
-            for (size_t i = work.size(); i > 0; --i)
-            {
-                AstNode* expr = work[i - 1];
-
-                // when multiple expressions depend on the same one we push it to work queue multiple times
-                if (result.exprs.contains(expr))
-                    continue;
-
-                std::optional<ModuleInfo> info;
-
-                if (AstNode* dep = getDependent(expr))
-                {
-                    /*printf("\nThis expression: ");
-                    Luau::dump(expr);
-                    printf("\nReturned this from getDependent()\n");
-                    Luau::dump(dep);
-                    printf("\n\n==NEXT==\n");*/
-
-                    const ModuleInfo* context = result.exprs.find(dep);
-
-                    if (context && expr->is<AstExprLocal>())
-                        info = *context; // locals just inherit their dependent context, no resolution required
-                    else if (context && (expr->is<AstExprGroup>() || expr->is<AstTypeGroup>()))
-                        info = *context; // simple group nodes propagate their value
-                    else if (context && (expr->is<AstTypeTypeof>() || expr->is<AstExprTypeAssertion>()))
-                        info = *context; // typeof type annotations will resolve to the typeof content
-
-					// Testing
-                    //else if (context && expr->is<AstExprTable>())
-                    //    info = *context;
-
-                    else if (AstExpr* asExpr = expr->asExpr())
-                        info = fileResolver->resolveModule(context, asExpr);
-                }
-                else if (AstExpr* asExpr = expr->asExpr())
-                {
-                    info = fileResolver->resolveModule(&moduleContext, asExpr);
-                }
-
-                if (info)
-                    result.exprs[expr] = std::move(*info);
-            }
+            if (AstNode* dep = getDependent(work[i])) {
+				/*printf("\nDEPENDENCY PUSHING This expression: ");
+				Luau::dump(work[i]);
+				printf("\nReturned this from getDependent()\n");
+				Luau::dump(dep);
+				printf("\n\n==NEXT==\n");*/
+				
+                work.push_back(dep);
+			}
         }
-        else
+
+        // resolve all expressions to a module info
+        for (size_t i = work.size(); i > 0; --i)
         {
-            // seed worklist with require arguments
-            work_DEPRECATED.reserve(requireCalls.size());
+            AstNode* expr = work[i - 1];
 
-            for (AstExprCall* require : requireCalls)
-                work_DEPRECATED.push_back(require->args.data[0]);
+            // when multiple expressions depend on the same one we push it to work queue multiple times
+            if (result.exprs.contains(expr))
+                continue;
 
-            // push all dependent expressions to the work stack; note that the vector is modified during traversal
-            for (size_t i = 0; i < work_DEPRECATED.size(); ++i)
-                if (AstExpr* dep = getDependent_DEPRECATED(work_DEPRECATED[i]))
-                    work_DEPRECATED.push_back(dep);
+            std::optional<ModuleInfo> info;
 
-            // resolve all expressions to a module info
-            for (size_t i = work_DEPRECATED.size(); i > 0; --i)
+            if (AstNode* dep = getDependent(expr))
             {
-                AstExpr* expr = work_DEPRECATED[i - 1];
+				/*printf("\nThis expression: ");
+				Luau::dump(expr);
+				printf("\nReturned this from getDependent()\n");
+				Luau::dump(dep);
+				printf("\n\n==NEXT==\n");*/
+				
+                const ModuleInfo* context = result.exprs.find(dep);
 
-                // when multiple expressions depend on the same one we push it to work queue multiple times
-                if (result.exprs.contains(expr))
-                    continue;
-
-                std::optional<ModuleInfo> info;
-
-                if (AstExpr* dep = getDependent_DEPRECATED(expr))
-                {
-                    const ModuleInfo* context = result.exprs.find(dep);
-
-                    // locals just inherit their dependent context, no resolution required
-                    if (expr->is<AstExprLocal>())
-                        info = context ? std::optional<ModuleInfo>(*context) : std::nullopt;
-                    else
-                        info = fileResolver->resolveModule(context, expr);
-                }
-                else
-                {
-                    info = fileResolver->resolveModule(&moduleContext, expr);
-                }
-
-                if (info)
-                    result.exprs[expr] = std::move(*info);
+                if (context && expr->is<AstExprLocal>())
+                    info = *context; // locals just inherit their dependent context, no resolution required
+                else if (context && (expr->is<AstExprGroup>() || expr->is<AstTypeGroup>()))
+                    info = *context; // simple group nodes propagate their value
+                else if (context && (expr->is<AstTypeTypeof>() || expr->is<AstExprTypeAssertion>()))
+                    info = *context; // typeof type annotations will resolve to the typeof content
+                else if (AstExpr* asExpr = expr->asExpr())
+                    info = fileResolver->resolveModule(context, asExpr);
+				
+				// Testing
+				//else if (context && expr->is<AstExprTable>())
+				//    info = *context;
             }
+            else if (AstExpr* asExpr = expr->asExpr())
+            {
+                info = fileResolver->resolveModule(&moduleContext, asExpr);
+            }
+
+            if (info)
+                result.exprs[expr] = std::move(*info);
         }
 
         // resolve all requires according to their argument
@@ -305,8 +255,7 @@ struct RequireTracer : AstVisitor
     ModuleName currentModuleName;
 
     DenseHashMap<AstLocal*, AstExpr*> locals;
-    //DenseHashMap<AstExpr*, AstExpr*> indexTblCache;
-    std::vector<AstExpr*> work_DEPRECATED;
+	//DenseHashMap<AstExpr*, AstExpr*> indexTblCache;
     std::vector<AstNode*> work;
     std::vector<AstExprCall*> requireCalls;
 };

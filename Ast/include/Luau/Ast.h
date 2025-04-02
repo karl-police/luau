@@ -194,6 +194,7 @@ public:
     {
         Checked,
         Native,
+        Deprecated,
     };
 
     AstAttr(const Location& location, Type type);
@@ -453,6 +454,7 @@ public:
     void visit(AstVisitor* visitor) override;
 
     bool hasNativeAttribute() const;
+    bool hasAttribute(AstAttr::Type attributeType) const;
 
     AstArray<AstAttr*> attributes;
     AstArray<AstGenericType*> generics;
@@ -890,14 +892,22 @@ class AstStatTypeFunction : public AstStat
 public:
     LUAU_RTTI(AstStatTypeFunction);
 
-    AstStatTypeFunction(const Location& location, const AstName& name, const Location& nameLocation, AstExprFunction* body, bool exported);
+    AstStatTypeFunction(
+        const Location& location,
+        const AstName& name,
+        const Location& nameLocation,
+        AstExprFunction* body,
+        bool exported,
+        bool hasErrors
+    );
 
     void visit(AstVisitor* visitor) override;
 
     AstName name;
     Location nameLocation;
-    AstExprFunction* body;
-    bool exported;
+    AstExprFunction* body = nullptr;
+    bool exported = false;
+    bool hasErrors = false;
 };
 
 class AstStatDeclareGlobal : public AstStat
@@ -950,6 +960,7 @@ public:
     void visit(AstVisitor* visitor) override;
 
     bool isCheckedFunction() const;
+    bool hasAttribute(AstAttr::Type attributeType) const;
 
     AstArray<AstAttr*> attributes;
     AstName name;
@@ -1106,6 +1117,7 @@ public:
     void visit(AstVisitor* visitor) override;
 
     bool isCheckedFunction() const;
+    bool hasAttribute(AstAttr::Type attributeType) const;
 
     AstArray<AstAttr*> attributes;
     AstArray<AstGenericType*> generics;
@@ -1125,6 +1137,16 @@ public:
     void visit(AstVisitor* visitor) override;
 
     AstExpr* expr;
+};
+
+class AstTypeOptional : public AstType
+{
+public:
+    LUAU_RTTI(AstTypeOptional)
+
+    AstTypeOptional(const Location& location);
+
+    void visit(AstVisitor* visitor) override;
 };
 
 class AstTypeUnion : public AstType
@@ -1449,6 +1471,10 @@ public:
     {
         return visit(static_cast<AstStat*>(node));
     }
+    virtual bool visit(class AstStatTypeFunction* node)
+    {
+        return visit(static_cast<AstStat*>(node));
+    }
     virtual bool visit(class AstStatDeclareFunction* node)
     {
         return visit(static_cast<AstStat*>(node));
@@ -1485,6 +1511,10 @@ public:
         return visit(static_cast<AstType*>(node));
     }
     virtual bool visit(class AstTypeTypeof* node)
+    {
+        return visit(static_cast<AstType*>(node));
+    }
+    virtual bool visit(class AstTypeOptional* node)
     {
         return visit(static_cast<AstType*>(node));
     }

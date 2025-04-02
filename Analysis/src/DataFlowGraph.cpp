@@ -82,12 +82,6 @@ std::optional<DefId> DataFlowGraph::getDefOptional(const AstExpr* expr) const
     return NotNull{*def};
 }
 
-std::optional<DefId> DataFlowGraph::getRValueDefForCompoundAssign(const AstExpr* expr) const
-{
-    auto def = compoundAssignDefs.find(expr);
-    return def ? std::optional<DefId>(*def) : std::nullopt;
-}
-
 DefId DataFlowGraph::getDef(const AstLocal* local) const
 {
     auto def = localDefs.find(local);
@@ -1168,6 +1162,8 @@ void DataFlowGraphBuilder::visitType(AstType* t)
         return visitType(f);
     else if (auto tyof = t->as<AstTypeTypeof>())
         return visitType(tyof);
+    else if (auto o = t->as<AstTypeOptional>())
+        return;
     else if (auto u = t->as<AstTypeUnion>())
         return visitType(u);
     else if (auto i = t->as<AstTypeIntersection>())

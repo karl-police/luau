@@ -1065,6 +1065,11 @@ struct AstJsonEncoder : public AstVisitor
         );
     }
 
+    void write(class AstTypeOptional* node)
+    {
+        writeNode(node, "AstTypeOptional", [&]() {});
+    }
+
     void write(class AstTypeUnion* node)
     {
         writeNode(
@@ -1146,6 +1151,8 @@ struct AstJsonEncoder : public AstVisitor
             return writeString("checked");
         case AstAttr::Type::Native:
             return writeString("native");
+        case AstAttr::Type::Deprecated:
+            return writeString("deprecated");
         }
     }
 

@@ -15,6 +15,28 @@ namespace Luau
 {
 struct FrontendOptions;
 
+enum class FragmentAutocompleteWaypoint
+{
+    ParseFragmentEnd,
+    CloneModuleStart,
+    CloneModuleEnd,
+    DfgBuildEnd,
+    CloneAndSquashScopeStart,
+    CloneAndSquashScopeEnd,
+    ConstraintSolverStart,
+    ConstraintSolverEnd,
+    TypecheckFragmentEnd,
+    AutocompleteEnd,
+    COUNT,
+};
+
+class IFragmentAutocompleteReporter
+{
+public:
+    virtual void reportWaypoint(FragmentAutocompleteWaypoint) = 0;
+    virtual void reportFragmentString(std::string_view) = 0;
+};
+
 enum class FragmentTypeCheckStatus
 {
     SkipAutocomplete,
@@ -27,6 +49,8 @@ struct FragmentAutocompleteAncestryResult
     std::vector<AstLocal*> localStack;
     std::vector<AstNode*> ancestry;
     AstStat* nearestStatement = nullptr;
+    AstStatBlock* parentBlock = nullptr;
+    Location fragmentSelectionRegion;
 };
 
 struct FragmentParseResult
@@ -37,6 +61,7 @@ struct FragmentParseResult
     AstStat* nearestStatement = nullptr;
     std::vector<Comment> commentLocations;
     std::unique_ptr<Allocator> alloc = std::make_unique<Allocator>();
+    Position scopePos{0, 0};
 };
 
 struct FragmentTypeCheckResult
@@ -54,10 +79,28 @@ struct FragmentAutocompleteResult
     AutocompleteResult acResults;
 };
 
-FragmentAutocompleteAncestryResult findAncestryForFragmentParse(AstStatBlock* root, const Position& cursorPos);
+struct FragmentRegion
+{
+    Location fragmentLocation;
+    AstStat* nearestStatement = nullptr; // used for tests
+    AstStatBlock* parentBlock = nullptr; // used for scope detection
+};
+
+FragmentRegion getFragmentRegion(AstStatBlock* root, const Position& cursorPosition);
+FragmentAutocompleteAncestryResult findAncestryForFragmentParse(AstStatBlock* stale, const Position& cursorPos, AstStatBlock* lastGoodParse);
+FragmentAutocompleteAncestryResult findAncestryForFragmentParse_DEPRECATED(AstStatBlock* root, const Position& cursorPos);
+
+std::optional<FragmentParseResult> parseFragment_DEPRECATED(
+    AstStatBlock* root,
+    AstNameTable* names,
+    std::string_view src,
+    const Position& cursorPos,
+    std::optional<Position> fragmentEndPosition
+);
 
 std::optional<FragmentParseResult> parseFragment(
-    AstStatBlock* root,
+    AstStatBlock* stale,
+    AstStatBlock* mostRecentParse,
     AstNameTable* names,
     std::string_view src,
     const Position& cursorPos,
@@ -70,7 +113,9 @@ std::pair<FragmentTypeCheckStatus, FragmentTypeCheckResult> typecheckFragment(
     const Position& cursorPos,
     std::optional<FrontendOptions> opts,
     std::string_view src,
-    std::optional<Position> fragmentEndPosition
+    std::optional<Position> fragmentEndPosition,
+    AstStatBlock* recentParse = nullptr,
+    IFragmentAutocompleteReporter* reporter = nullptr
 );
 
 FragmentAutocompleteResult fragmentAutocomplete(
@@ -80,7 +125,9 @@ FragmentAutocompleteResult fragmentAutocomplete(
     Position cursorPosition,
     std::optional<FrontendOptions> opts,
     StringCompletionCallback callback,
-    std::optional<Position> fragmentEndPosition = std::nullopt
+    std::optional<Position> fragmentEndPosition = std::nullopt,
+    AstStatBlock* recentParse = nullptr,
+    IFragmentAutocompleteReporter* reporter = nullptr
 );
 
 enum class FragmentAutocompleteStatus
@@ -102,6 +149,7 @@ struct FragmentContext
     const ParseResult& freshParse;
     std::optional<FrontendOptions> opts;
     std::optional<Position> DEPRECATED_fragmentEndPosition;
+    IFragmentAutocompleteReporter* reporter = nullptr;
 };
 
 /**
