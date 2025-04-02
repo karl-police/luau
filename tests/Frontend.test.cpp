@@ -17,8 +17,8 @@ LUAU_FASTFLAG(LuauSolverV2);
 LUAU_FASTFLAG(DebugLuauFreezeArena)
 LUAU_FASTFLAG(DebugLuauMagicTypes)
 LUAU_FASTFLAG(LuauSelectivelyRetainDFGArena)
-LUAU_FASTFLAG(LuauBetterReverseDependencyTracking)
 LUAU_FASTFLAG(LuauModuleHoldsAstRoot)
+LUAU_FASTFLAG(LuauImproveTypePathsInErrors)
 
 namespace
 {
@@ -921,7 +921,17 @@ TEST_CASE_FIXTURE(FrontendFixture, "it_should_be_safe_to_stringify_errors_when_f
     // When this test fails, it is because the TypeIds needed by the error have been deallocated.
     // It is thus basically impossible to predict what will happen when this assert is evaluated.
     // It could segfault, or you could see weird type names like the empty string or <VALUELESS BY EXCEPTION>
-    if (FFlag::LuauSolverV2)
+    if (FFlag::LuauSolverV2 && FFlag::LuauImproveTypePathsInErrors)
+    {
+        REQUIRE_EQ(
+            "Type\n\t"
+            "'{ count: string }'"
+            "\ncould not be converted into\n\t"
+            "'{ Count: number }'",
+            toString(result.errors[0])
+        );
+    }
+    else if (FFlag::LuauSolverV2)
         REQUIRE_EQ(
             R"(Type
     '{ count: string }'
@@ -1589,8 +1599,6 @@ return {x = a, y = b, z = c}
 
 TEST_CASE_FIXTURE(FrontendFixture, "test_traverse_dependents")
 {
-    ScopedFastFlag dependencyTracking{FFlag::LuauBetterReverseDependencyTracking, true};
-
     fileResolver.source["game/Gui/Modules/A"] = "return {hello=5, world=true}";
     fileResolver.source["game/Gui/Modules/B"] = R"(
         return require(game:GetService('Gui').Modules.A)
@@ -1623,8 +1631,6 @@ TEST_CASE_FIXTURE(FrontendFixture, "test_traverse_dependents")
 
 TEST_CASE_FIXTURE(FrontendFixture, "test_traverse_dependents_early_exit")
 {
-    ScopedFastFlag dependencyTracking{FFlag::LuauBetterReverseDependencyTracking, true};
-
     fileResolver.source["game/Gui/Modules/A"] = "return {hello=5, world=true}";
     fileResolver.source["game/Gui/Modules/B"] = R"(
         return require(game:GetService('Gui').Modules.A)
@@ -1652,8 +1658,6 @@ TEST_CASE_FIXTURE(FrontendFixture, "test_traverse_dependents_early_exit")
 
 TEST_CASE_FIXTURE(FrontendFixture, "test_dependents_stored_on_node_as_graph_updates")
 {
-    ScopedFastFlag dependencyTracking{FFlag::LuauBetterReverseDependencyTracking, true};
-
     auto updateSource = [&](const std::string& name, const std::string& source)
     {
         fileResolver.source[name] = source;
@@ -1768,7 +1772,6 @@ TEST_CASE_FIXTURE(FrontendFixture, "test_dependents_stored_on_node_as_graph_upda
 
 TEST_CASE_FIXTURE(FrontendFixture, "test_invalid_dependency_tracking_per_module_resolver")
 {
-    ScopedFastFlag dependencyTracking{FFlag::LuauBetterReverseDependencyTracking, true};
     ScopedFastFlag newSolver{FFlag::LuauSolverV2, false};
 
     fileResolver.source["game/Gui/Modules/A"] = "return {hello=5, world=true}";

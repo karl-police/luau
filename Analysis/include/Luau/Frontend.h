@@ -10,7 +10,6 @@
 #include "Luau/Set.h"
 #include "Luau/TypeCheckLimits.h"
 #include "Luau/Variant.h"
-#include "Luau/AnyTypeSummary.h"
 
 #include <mutex>
 #include <string>
@@ -34,7 +33,6 @@ struct HotComment;
 struct BuildQueueItem;
 struct BuildQueueWorkState;
 struct FrontendCancellationToken;
-struct AnyTypeSummary;
 
 struct LoadDefinitionFileResult
 {
@@ -305,6 +303,7 @@ ModulePtr check(
     NotNull<ModuleResolver> moduleResolver,
     NotNull<FileResolver> fileResolver,
     const ScopePtr& globalScope,
+    const ScopePtr& typeFunctionScope,
     std::function<void(const ModuleName&, const ScopePtr&)> prepareModuleScope,
     FrontendOptions options,
     TypeCheckLimits limits
@@ -319,6 +318,7 @@ ModulePtr check(
     NotNull<ModuleResolver> moduleResolver,
     NotNull<FileResolver> fileResolver,
     const ScopePtr& globalScope,
+    const ScopePtr& typeFunctionScope,
     std::function<void(const ModuleName&, const ScopePtr&)> prepareModuleScope,
     FrontendOptions options,
     TypeCheckLimits limits,

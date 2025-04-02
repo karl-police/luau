@@ -18,12 +18,17 @@ LUAU_FASTINT(LuauParseErrorLimit)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauAllowComplexTypesInGenericParams)
 LUAU_FASTFLAG(LuauErrorRecoveryForTableTypes)
-LUAU_FASTFLAG(LuauErrorRecoveryForClassNames)
-LUAU_FASTFLAG(LuauFixFunctionNameStartPosition)
 LUAU_FASTFLAG(LuauExtendStatEndPosWithSemicolon)
 LUAU_FASTFLAG(LuauPreserveUnionIntersectionNodeForLeadingTokenSingleType)
-LUAU_FASTFLAG(LuauAstTypeGroup2)
+LUAU_FASTFLAG(LuauAstTypeGroup3)
 LUAU_FASTFLAG(LuauFixDoBlockEndLocation)
+LUAU_FASTFLAG(LuauParseOptionalAsNode2)
+LUAU_FASTFLAG(LuauParseStringIndexer)
+LUAU_FASTFLAG(LuauFixFunctionWithAttributesStartLocation)
+LUAU_DYNAMIC_FASTFLAG(DebugLuauReportReturnTypeVariadicWithTypeSuffix)
+
+// Clip with DebugLuauReportReturnTypeVariadicWithTypeSuffix
+extern bool luau_telemetry_parsed_return_type_variadic_with_type_suffix;
 
 namespace
 {
@@ -372,7 +377,7 @@ TEST_CASE_FIXTURE(Fixture, "return_type_is_an_intersection_type_if_led_with_one_
 
     AstTypeIntersection* returnAnnotation = annotation->returnTypes.types.data[0]->as<AstTypeIntersection>();
     REQUIRE(returnAnnotation != nullptr);
-    if (FFlag::LuauAstTypeGroup2)
+    if (FFlag::LuauAstTypeGroup3)
         CHECK(returnAnnotation->types.data[0]->as<AstTypeGroup>());
     else
         CHECK(returnAnnotation->types.data[0]->as<AstTypeReference>());
@@ -2127,8 +2132,6 @@ TEST_CASE_FIXTURE(Fixture, "variadic_definition_parsing")
 
 TEST_CASE_FIXTURE(Fixture, "missing_declaration_prop")
 {
-    ScopedFastFlag luauErrorRecoveryForClassNames{FFlag::LuauErrorRecoveryForClassNames, true};
-
     matchParseError(
         R"(
         declare class Foo
@@ -2451,7 +2454,7 @@ TEST_CASE_FIXTURE(Fixture, "leading_union_intersection_with_single_type_preserve
 
 TEST_CASE_FIXTURE(Fixture, "parse_simple_ast_type_group")
 {
-    ScopedFastFlag _{FFlag::LuauAstTypeGroup2, true};
+    ScopedFastFlag _{FFlag::LuauAstTypeGroup3, true};
 
     AstStatBlock* stat = parse(R"(
         type Foo = (string)
@@ -2469,7 +2472,7 @@ TEST_CASE_FIXTURE(Fixture, "parse_simple_ast_type_group")
 
 TEST_CASE_FIXTURE(Fixture, "parse_nested_ast_type_group")
 {
-    ScopedFastFlag _{FFlag::LuauAstTypeGroup2, true};
+    ScopedFastFlag _{FFlag::LuauAstTypeGroup3, true};
 
     AstStatBlock* stat = parse(R"(
         type Foo = ((string))
@@ -2490,7 +2493,7 @@ TEST_CASE_FIXTURE(Fixture, "parse_nested_ast_type_group")
 
 TEST_CASE_FIXTURE(Fixture, "parse_return_type_ast_type_group")
 {
-    ScopedFastFlag _{FFlag::LuauAstTypeGroup2, true};
+    ScopedFastFlag _{FFlag::LuauAstTypeGroup3, true};
 
     AstStatBlock* stat = parse(R"(
         type Foo = () -> (string)
@@ -2541,6 +2544,40 @@ TEST_CASE_FIXTURE(Fixture, "do_block_end_location_is_after_end_token")
     auto block = stat->body.data[0]->as<AstStatBlock>();
     REQUIRE(block);
     CHECK_EQ(block->location, Location{{1, 8}, {3, 11}});
+}
+
+TEST_CASE_FIXTURE(Fixture, "function_start_locations_are_before_attributes")
+{
+    ScopedFastFlag _{FFlag::LuauFixFunctionWithAttributesStartLocation, true};
+
+    AstStatBlock* stat = parse(R"(
+        @native
+        function globalFunction()
+        end
+
+        @native
+        local function localFunction()
+        end
+
+        local _ = @native function()
+        end
+    )");
+    REQUIRE(stat);
+    REQUIRE_EQ(3, stat->body.size);
+
+    auto globalFunction = stat->body.data[0]->as<AstStatFunction>();
+    REQUIRE(globalFunction);
+    CHECK_EQ(globalFunction->location, Location({1, 8}, {3, 11}));
+
+    auto localFunction = stat->body.data[1]->as<AstStatLocalFunction>();
+    REQUIRE(localFunction);
+    CHECK_EQ(localFunction->location, Location({5, 8}, {7, 11}));
+
+    auto localVariable = stat->body.data[2]->as<AstStatLocal>();
+    REQUIRE(localVariable);
+    REQUIRE_EQ(localVariable->values.size, 1);
+    auto anonymousFunction = localVariable->values.data[0]->as<AstExprFunction>();
+    CHECK_EQ(anonymousFunction->location, Location({9, 18}, {10, 11}));
 }
 
 TEST_SUITE_END();
@@ -3813,7 +3850,7 @@ TEST_CASE_FIXTURE(Fixture, "grouped_function_type")
     auto unionTy = paramTy.type->as<AstTypeUnion>();
     LUAU_ASSERT(unionTy);
     CHECK_EQ(unionTy->types.size, 2);
-    if (FFlag::LuauAstTypeGroup2)
+    if (FFlag::LuauAstTypeGroup3)
     {
         auto groupTy = unionTy->types.data[0]->as<AstTypeGroup>(); // (() -> ())
         REQUIRE(groupTy);
@@ -3821,7 +3858,10 @@ TEST_CASE_FIXTURE(Fixture, "grouped_function_type")
     }
     else
         CHECK(unionTy->types.data[0]->is<AstTypeFunction>()); // () -> ()
-    CHECK(unionTy->types.data[1]->is<AstTypeReference>());    // nil
+    if (FFlag::LuauParseOptionalAsNode2)
+        CHECK(unionTy->types.data[1]->is<AstTypeOptional>()); // ?
+    else
+        CHECK(unionTy->types.data[1]->is<AstTypeReference>()); // nil
 }
 
 TEST_CASE_FIXTURE(Fixture, "complex_union_in_generic_ty")
@@ -3879,7 +3919,6 @@ TEST_CASE_FIXTURE(Fixture, "recover_from_bad_table_type")
 
 TEST_CASE_FIXTURE(Fixture, "function_name_has_correct_start_location")
 {
-    ScopedFastFlag _{FFlag::LuauFixFunctionNameStartPosition, true};
     AstStatBlock* block = parse(R"(
         function simple()
         end
@@ -3926,5 +3965,24 @@ TEST_CASE_FIXTURE(Fixture, "stat_end_includes_semicolon_position")
     CHECK_EQ(Position{3, 22}, stat3->location.end);
 }
 
+TEST_CASE_FIXTURE(Fixture, "parsing_type_suffix_for_return_type_with_variadic")
+{
+    ScopedFastFlag sff{DFFlag::DebugLuauReportReturnTypeVariadicWithTypeSuffix, true};
+
+    ParseResult result = tryParse(R"(
+        function foo(): (string, ...number) | boolean
+        end
+    )");
+
+    // TODO(CLI-140667): this should produce a ParseError in future when we fix the invalid syntax
+    CHECK(result.errors.size() == 0);
+    CHECK_EQ(luau_telemetry_parsed_return_type_variadic_with_type_suffix, true);
+}
+
+TEST_CASE_FIXTURE(Fixture, "parsing_string_union_indexers")
+{
+    ScopedFastFlag _{FFlag::LuauParseStringIndexer, true};
+    parse(R"(type foo = { ["bar" | "baz"]: number })");
+}
 
 TEST_SUITE_END();

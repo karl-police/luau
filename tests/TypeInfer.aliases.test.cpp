@@ -11,6 +11,11 @@ using namespace Luau;
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauFixInfiniteRecursionInNormalization)
+LUAU_FASTFLAG(LuauImproveTypePathsInErrors)
+LUAU_FASTFLAG(LuauPrecalculateMutatedFreeTypes2)
+LUAU_FASTFLAG(LuauDeferBidirectionalInferenceForTableAssignment)
+LUAU_FASTFLAG(LuauBidirectionalInferenceUpcast)
+LUAU_FASTFLAG(LuauBidirectionalInferenceCollectIndexerTypes)
 
 TEST_SUITE_BEGIN("TypeAliases");
 
@@ -216,7 +221,11 @@ TEST_CASE_FIXTURE(Fixture, "generic_aliases")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    const std::string expected = R"(Type '{ v: string }' could not be converted into 'T<number>'; at [read "v"], string is not exactly number)";
+    const std::string expected = (FFlag::LuauImproveTypePathsInErrors)
+                                     ? "Type '{ v: string }' could not be converted into 'T<number>'; \n"
+                                       "this is because accessing `v` results in `string` in the former type and `number` in the latter type, and "
+                                       "`string` is not exactly `number`"
+                                     : R"(Type '{ v: string }' could not be converted into 'T<number>'; at [read "v"], string is not exactly number)";
     CHECK(result.errors[0].location == Location{{4, 31}, {4, 44}});
     CHECK_EQ(expected, toString(result.errors[0]));
 }
@@ -236,7 +245,11 @@ TEST_CASE_FIXTURE(Fixture, "dependent_generic_aliases")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     const std::string expected =
-        R"(Type '{ t: { v: string } }' could not be converted into 'U<number>'; at [read "t"][read "v"], string is not exactly number)";
+        (FFlag::LuauImproveTypePathsInErrors)
+            ? "Type '{ t: { v: string } }' could not be converted into 'U<number>'; \n"
+              "this is because accessing `t.v` results in `string` in the former type and `number` in the latter type, and `string` is not exactly "
+              "`number`"
+            : R"(Type '{ t: { v: string } }' could not be converted into 'U<number>'; at [read "t"][read "v"], string is not exactly number)";
 
     CHECK(result.errors[0].location == Location{{4, 31}, {4, 52}});
     CHECK_EQ(expected, toString(result.errors[0]));
@@ -244,8 +257,12 @@ TEST_CASE_FIXTURE(Fixture, "dependent_generic_aliases")
 
 TEST_CASE_FIXTURE(Fixture, "mutually_recursive_generic_aliases")
 {
-    // CLI-116108
-    DOES_NOT_PASS_NEW_SOLVER_GUARD();
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauPrecalculateMutatedFreeTypes2, true},
+        {FFlag::LuauDeferBidirectionalInferenceForTableAssignment, true},
+        {FFlag::LuauBidirectionalInferenceUpcast, true},
+        {FFlag::LuauBidirectionalInferenceCollectIndexerTypes, true},
+    };
 
     CheckResult result = check(R"(
         --!strict

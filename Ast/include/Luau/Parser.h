@@ -125,7 +125,7 @@ private:
     AstStat* parseFor();
 
     // funcname ::= Name {`.' Name} [`:' Name]
-    AstExpr* parseFunctionName(Location start_DEPRECATED, bool& hasself, AstName& debugname);
+    AstExpr* parseFunctionName(bool& hasself, AstName& debugname);
 
     // function funcname funcbody
     LUAU_FORCEINLINE AstStat* parseFunctionStat(const AstArray<AstAttr*>& attributes = {nullptr, 0});
@@ -155,9 +155,11 @@ private:
     AstStat* parseTypeAlias(const Location& start, bool exported, Position typeKeywordPosition);
 
     // type function Name ... end
-    AstStat* parseTypeFunction(const Location& start, bool exported);
+    AstStat* parseTypeFunction(const Location& start, bool exported, Position typeKeywordPosition);
 
-    AstDeclaredClassProp parseDeclaredClassMethod();
+    AstDeclaredClassProp parseDeclaredClassMethod(const AstArray<AstAttr*>& attributes);
+    AstDeclaredClassProp parseDeclaredClassMethod_DEPRECATED();
+
 
     // `declare global' Name: Type |
     // `declare function' Name`(' [parlist] `)' [`:` Type]
@@ -192,7 +194,8 @@ private:
     std::tuple<bool, Location, AstTypePack*> parseBindingList(
         TempVector<Binding>& result,
         bool allowDot3 = false,
-        TempVector<Position>* commaPositions = nullptr
+        AstArray<Position>* commaPositions = nullptr,
+        std::optional<Position> initialCommaPosition = std::nullopt
     );
 
     AstType* parseOptionalType();
@@ -209,9 +212,14 @@ private:
     //      |   `(' [TypeList] `)' `->` ReturnType
 
     // Returns the variadic annotation, if it exists.
-    AstTypePack* parseTypeList(TempVector<AstType*>& result, TempVector<std::optional<AstArgumentName>>& resultNames);
+    AstTypePack* parseTypeList(
+        TempVector<AstType*>& result,
+        TempVector<std::optional<AstArgumentName>>& resultNames,
+        TempVector<Position>* commaPositions = nullptr,
+        TempVector<std::optional<Position>>* nameColonPositions = nullptr
+    );
 
-    std::optional<AstTypeList> parseOptionalReturnType();
+    std::optional<AstTypeList> parseOptionalReturnType(Position* returnSpecifierPosition = nullptr);
     std::pair<Location, AstTypeList> parseReturnType();
 
     struct TableIndexerResult
@@ -222,9 +230,9 @@ private:
         Position colonPosition;
     };
 
-    TableIndexerResult parseTableIndexer(AstTableAccess access, std::optional<Location> accessLocation);
-    // Remove with FFlagLuauStoreCSTData
-    AstTableIndexer* parseTableIndexer_DEPRECATED(AstTableAccess access, std::optional<Location> accessLocation);
+    TableIndexerResult parseTableIndexer(AstTableAccess access, std::optional<Location> accessLocation, Lexeme begin);
+    // Remove with FFlagLuauStoreCSTData2
+    AstTableIndexer* parseTableIndexer_DEPRECATED(AstTableAccess access, std::optional<Location> accessLocation, Lexeme begin);
 
     AstTypeOrPack parseFunctionType(bool allowPack, const AstArray<AstAttr*>& attributes);
     AstType* parseFunctionTypeTail(
@@ -305,7 +313,7 @@ private:
     std::pair<AstArray<AstGenericType*>, AstArray<AstGenericTypePack*>> parseGenericTypeList(
         bool withDefaultValues,
         Position* openPosition = nullptr,
-        TempVector<Position>* commaPositions = nullptr,
+        AstArray<Position>* commaPositions = nullptr,
         Position* closePosition = nullptr
     );
 
@@ -491,6 +499,7 @@ private:
     std::vector<AstGenericTypePack*> scratchGenericTypePacks;
     std::vector<std::optional<AstArgumentName>> scratchOptArgName;
     std::vector<Position> scratchPosition;
+    std::vector<std::optional<Position>> scratchOptPosition;
     std::string scratchData;
 
     CstNodeMap cstNodeMap;
