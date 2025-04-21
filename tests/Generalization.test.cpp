@@ -15,6 +15,10 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(LuauNonReentrantGeneralization2)
+LUAU_FASTFLAG(DebugLuauForbidInternalTypes)
+LUAU_FASTFLAG(LuauTrackInteriorFreeTypesOnScope)
+LUAU_FASTFLAG(LuauTrackInferredFunctionTypeFromCall)
 
 TEST_SUITE_BEGIN("Generalization");
 
@@ -211,6 +215,92 @@ TEST_CASE_FIXTURE(GeneralizationFixture, "intersection_type_traversal_doesnt_cra
     generalize(intersectionType);
 }
 
+TEST_CASE_FIXTURE(GeneralizationFixture, "('a) -> 'a")
+{
+    TypeId freeTy = freshType().first;
+    TypeId fnTy = arena.addType(FunctionType{arena.addTypePack({freeTy}), arena.addTypePack({freeTy})});
+
+    generalize(fnTy);
+
+    CHECK("<a>(a) -> a" == toString(fnTy));
+}
+
+TEST_CASE_FIXTURE(GeneralizationFixture, "(t1, (t1 <: 'b)) -> () where t1 = ('a <: (t1 <: 'b) & {number} & {number})")
+{
+    ScopedFastFlag sff{FFlag::LuauNonReentrantGeneralization2, true};
+
+    TableType tt;
+    tt.indexer = TableIndexer{builtinTypes.numberType, builtinTypes.numberType};
+    TypeId numberArray = arena.addType(TableType{tt});
+
+    auto [aTy, aFree] = freshType();
+    auto [bTy, bFree] = freshType();
+
+    aFree->upperBound = arena.addType(IntersectionType{{bTy, numberArray, numberArray}});
+    bFree->lowerBound = aTy;
+
+    TypeId functionTy = arena.addType(FunctionType{arena.addTypePack({aTy, bTy}), builtinTypes.emptyTypePack});
+
+    generalize(functionTy);
+
+    CHECK("(unknown & {number}, unknown) -> ()" == toString(functionTy));
+}
+
+TEST_CASE_FIXTURE(GeneralizationFixture, "(('a <: number | string)) -> string?")
+{
+    auto [aTy, aFree] = freshType();
+
+    aFree->upperBound = arena.addType(UnionType{{builtinTypes.numberType, builtinTypes.stringType}});
+
+    TypeId fnType = arena.addType(FunctionType{arena.addTypePack({aTy}), arena.addTypePack({builtinTypes.optionalStringType})});
+
+    generalize(fnType);
+
+    CHECK("(number | string) -> string?" == toString(fnType));
+}
+
+TEST_CASE_FIXTURE(GeneralizationFixture, "(('a <: {'b})) -> ()")
+{
+    ScopedFastFlag sff{FFlag::LuauNonReentrantGeneralization2, true};
+
+    auto [aTy, aFree] = freshType();
+    auto [bTy, bFree] = freshType();
+
+    TableType tt;
+    tt.indexer = TableIndexer{builtinTypes.numberType, bTy};
+
+    aFree->upperBound = arena.addType(tt);
+
+    TypeId functionTy = arena.addType(FunctionType{arena.addTypePack({aTy}), builtinTypes.emptyTypePack});
+
+    generalize(functionTy);
+
+    // The free type 'b is not replace with unknown because it appears in an
+    // invariant context.
+    CHECK("<a>({a}) -> ()" == toString(functionTy));
+}
+
+TEST_CASE_FIXTURE(GeneralizationFixture, "(('b <: {t1}), ('a <: t1)) -> t1 where t1 = (('a <: t1) <: 'c)")
+{
+    auto [aTy, aFree] = freshType();
+    auto [bTy, bFree] = freshType();
+    auto [cTy, cFree] = freshType();
+
+    aFree->upperBound = cTy;
+    cFree->lowerBound = aTy;
+
+    TableType tt;
+    tt.indexer = TableIndexer{builtinTypes.numberType, cTy};
+
+    bFree->upperBound = arena.addType(tt);
+
+    TypeId functionTy = arena.addType(FunctionType{arena.addTypePack({bTy, aTy}), arena.addTypePack({cTy})});
+
+    generalize(functionTy);
+
+    CHECK("<a>({a}, a) -> a" == toString(functionTy));
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "generalization_traversal_should_re_traverse_unions_if_they_change_type")
 {
     // This test case should just not assert
@@ -230,7 +320,7 @@ function foo()
    button.LayoutOrder = func(product) * dir
   end
  end
- 
+
   function(mode)
    if mode == 'Name'then
    else
@@ -248,6 +338,44 @@ function foo()
   end
 end
 )");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "generalization_should_not_leak_free_type")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::DebugLuauForbidInternalTypes, true},
+        {FFlag::LuauTrackInteriorFreeTypesOnScope, true},
+        {FFlag::LuauTrackInferredFunctionTypeFromCall, true}
+    };
+
+    // This test case should just not assert
+    CheckResult result = check(R"(
+        function foo()
+
+            local productButtonPairs = {}
+            local func
+            local dir = -1
+
+            local function updateSearch()
+                for product, button in pairs(productButtonPairs) do
+                    -- This line may have a floating free type pack.
+                    button.LayoutOrder = func(product) * dir
+                end
+            end
+
+            function(mode)
+                if mode == 'New'then
+                    func = function(p)
+                        return p.id
+                    end
+                elseif mode == 'Price'then
+                    func = function(p)
+                        return p.price
+                    end
+                end
+            end
+        end
+    )");
 }
 
 TEST_SUITE_END();

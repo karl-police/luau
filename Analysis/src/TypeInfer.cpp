@@ -34,8 +34,10 @@ LUAU_FASTFLAGVARIABLE(DebugLuauFreezeDuringUnification)
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
 LUAU_FASTFLAG(LuauPreserveUnionIntersectionNodeForLeadingTokenSingleType)
 LUAU_FASTFLAG(LuauFreeTypesMustHaveBounds)
-
-LUAU_FASTFLAG(LuauModuleHoldsAstRoot)
+LUAU_FASTFLAG(LuauRetainDefinitionAliasLocations)
+LUAU_FASTFLAGVARIABLE(LuauStatForInFix)
+LUAU_FASTFLAGVARIABLE(LuauReduceCheckBinaryExprStackPressure)
+LUAU_FASTFLAGVARIABLE(LuauLimitIterationWhenCheckingArgumentCounts)
 
 namespace Luau
 {
@@ -256,8 +258,7 @@ ModulePtr TypeChecker::checkWithoutRecursionCheck(const SourceModule& module, Mo
     currentModule->type = module.type;
     currentModule->allocator = module.allocator;
     currentModule->names = module.names;
-    if (FFlag::LuauModuleHoldsAstRoot)
-        currentModule->root = module.root;
+    currentModule->root = module.root;
 
     iceHandler->moduleName = module.name;
     normalizer.arena = &currentModule->internalTypes;
@@ -1319,8 +1320,24 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatForIn& forin)
             // Extract the remaining return values of the call
             // and check them against the parameter types of the iterator function.
             auto [types, tail] = flatten(callRetPack);
-            std::vector<TypeId> argTypes = std::vector<TypeId>(types.begin() + 1, types.end());
-            argPack = addTypePack(TypePackVar{TypePack{std::move(argTypes), tail}});
+
+            if (FFlag::LuauStatForInFix)
+            {
+                if (!types.empty())
+                {
+                    std::vector<TypeId> argTypes = std::vector<TypeId>(types.begin() + 1, types.end());
+                    argPack = addTypePack(TypePackVar{TypePack{std::move(argTypes), tail}});
+                }
+                else
+                {
+                    argPack = addTypePack(TypePack{});
+                }
+            }
+            else
+            {
+                std::vector<TypeId> argTypes = std::vector<TypeId>(types.begin() + 1, types.end());
+                argPack = addTypePack(TypePackVar{TypePack{std::move(argTypes), tail}});
+            }
         }
         else
         {
@@ -1658,7 +1675,10 @@ void TypeChecker::prototype(const ScopePtr& scope, const AstStatTypeAlias& typea
             FreeType* ftv = getMutable<FreeType>(ty);
             LUAU_ASSERT(ftv);
             ftv->forwardedTypeAlias = true;
-            bindingsMap[name] = {std::move(generics), std::move(genericPacks), ty};
+            if (FFlag::LuauRetainDefinitionAliasLocations)
+                bindingsMap[name] = {std::move(generics), std::move(genericPacks), ty, typealias.location};
+            else
+                bindingsMap[name] = {std::move(generics), std::move(genericPacks), ty};
 
             scope->typeAliasLocations[name] = typealias.location;
             scope->typeAliasNameLocations[name] = typealias.nameLocation;
@@ -1703,7 +1723,10 @@ void TypeChecker::prototype(const ScopePtr& scope, const AstStatDeclareClass& de
     TypeId metaTy = addType(TableType{TableState::Sealed, scope->level});
 
     ctv->metatable = metaTy;
-    scope->exportedTypeBindings[className] = TypeFun{{}, classTy};
+    if (FFlag::LuauRetainDefinitionAliasLocations)
+        scope->exportedTypeBindings[className] = TypeFun{{}, classTy, declaredClass.location};
+    else
+        scope->exportedTypeBindings[className] = TypeFun{{}, classTy};
 }
 
 ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatDeclareClass& declaredClass)
@@ -1903,7 +1926,7 @@ WithPredicate<TypeId> TypeChecker::checkExpr(const ScopePtr& scope, const AstExp
     else if (auto a = expr.as<AstExprUnary>())
         result = checkExpr(scope, *a);
     else if (auto a = expr.as<AstExprBinary>())
-        result = checkExpr(scope, *a, expectedType);
+        result = FFlag::LuauReduceCheckBinaryExprStackPressure ? checkExpr(scope, *a, expectedType) : checkExpr_DEPRECATED(scope, *a, expectedType);
     else if (auto a = expr.as<AstExprTypeAssertion>())
         result = checkExpr(scope, *a);
     else if (auto a = expr.as<AstExprError>())
@@ -3166,19 +3189,81 @@ WithPredicate<TypeId> TypeChecker::checkExpr(const ScopePtr& scope, const AstExp
     }
     else if (expr.op == AstExprBinary::CompareEq || expr.op == AstExprBinary::CompareNe)
     {
+        // Defer the stack allocation of lhs, predicate etc until this lambda is called.
+        auto checkExprOr = [&]() -> WithPredicate<TypeId>
+        {
+            // For these, passing expectedType is worse than simply forcing them, because their implementation
+            // may inadvertently check if expectedTypes exist first and use it, instead of forceSingleton first.
+            WithPredicate<TypeId> lhs = checkExpr(scope, *expr.left, std::nullopt, /*forceSingleton=*/true);
+            WithPredicate<TypeId> rhs = checkExpr(scope, *expr.right, std::nullopt, /*forceSingleton=*/true);
+
+            if (auto predicate = tryGetTypeGuardPredicate(expr))
+                return {booleanType, {std::move(*predicate)}};
+
+            PredicateVec predicates;
+
+            if (auto lvalue = tryGetLValue(*expr.left))
+                predicates.emplace_back(EqPredicate{std::move(*lvalue), rhs.type, expr.location});
+
+            if (auto lvalue = tryGetLValue(*expr.right))
+                predicates.emplace_back(EqPredicate{std::move(*lvalue), lhs.type, expr.location});
+
+            if (!predicates.empty() && expr.op == AstExprBinary::CompareNe)
+                predicates = {NotPredicate{std::move(predicates)}};
+
+            return {checkBinaryOperation(scope, expr, lhs.type, rhs.type), std::move(predicates)};
+        };
+        return checkExprOr();
+    }
+    else
+    {
+        // Expected types are not useful for other binary operators.
+        WithPredicate<TypeId> lhs = checkExpr(scope, *expr.left);
+        WithPredicate<TypeId> rhs = checkExpr(scope, *expr.right);
+
+        // Intentionally discarding predicates with other operators.
+        return WithPredicate{checkBinaryOperation(scope, expr, lhs.type, rhs.type, lhs.predicates)};
+    }
+}
+
+WithPredicate<TypeId> TypeChecker::checkExpr_DEPRECATED(const ScopePtr& scope, const AstExprBinary& expr, std::optional<TypeId> expectedType)
+{
+    if (expr.op == AstExprBinary::And)
+    {
+        auto [lhsTy, lhsPredicates] = checkExpr(scope, *expr.left, expectedType);
+
+        ScopePtr innerScope = childScope(scope, expr.location);
+        resolve(lhsPredicates, innerScope, true);
+
+        auto [rhsTy, rhsPredicates] = checkExpr(innerScope, *expr.right, expectedType);
+
+        return {checkBinaryOperation(scope, expr, lhsTy, rhsTy), {AndPredicate{std::move(lhsPredicates), std::move(rhsPredicates)}}};
+    }
+    else if (expr.op == AstExprBinary::Or)
+    {
+        auto [lhsTy, lhsPredicates] = checkExpr(scope, *expr.left, expectedType);
+
+        ScopePtr innerScope = childScope(scope, expr.location);
+        resolve(lhsPredicates, innerScope, false);
+
+        auto [rhsTy, rhsPredicates] = checkExpr(innerScope, *expr.right, expectedType);
+
+        // Because of C++, I'm not sure if lhsPredicates was not moved out by the time we call checkBinaryOperation.
+        TypeId result = checkBinaryOperation(scope, expr, lhsTy, rhsTy, lhsPredicates);
+        return {result, {OrPredicate{std::move(lhsPredicates), std::move(rhsPredicates)}}};
+    }
+    else if (expr.op == AstExprBinary::CompareEq || expr.op == AstExprBinary::CompareNe)
+    {
         // For these, passing expectedType is worse than simply forcing them, because their implementation
         // may inadvertently check if expectedTypes exist first and use it, instead of forceSingleton first.
         WithPredicate<TypeId> lhs = checkExpr(scope, *expr.left, std::nullopt, /*forceSingleton=*/true);
         WithPredicate<TypeId> rhs = checkExpr(scope, *expr.right, std::nullopt, /*forceSingleton=*/true);
-
         if (auto predicate = tryGetTypeGuardPredicate(expr))
             return {booleanType, {std::move(*predicate)}};
 
         PredicateVec predicates;
-
         if (auto lvalue = tryGetLValue(*expr.left))
             predicates.push_back(EqPredicate{std::move(*lvalue), rhs.type, expr.location});
-
         if (auto lvalue = tryGetLValue(*expr.right))
             predicates.push_back(EqPredicate{std::move(*lvalue), lhs.type, expr.location});
 
@@ -4029,6 +4114,23 @@ void TypeChecker::checkArgumentList(
 
     size_t paramIndex = 0;
 
+    int loopCount = 0;
+    auto exceedsLoopCount = [&]()
+    {
+        if (FFlag::LuauLimitIterationWhenCheckingArgumentCounts)
+        {
+            ++loopCount;
+            if (loopCount > FInt::LuauTypeInferTypePackLoopLimit)
+            {
+                state.reportError(TypeError{state.location, CodeTooComplex{}});
+                reportErrorCodeTooComplex(state.location);
+                return true;
+            }
+        }
+
+        return false;
+    };
+
     auto reportCountMismatchError = [&state, &argLocations, paramPack, argPack, &funName]()
     {
         // For this case, we want the error span to cover every errant extra parameter
@@ -4103,12 +4205,17 @@ void TypeChecker::checkArgumentList(
                 }
                 else if (auto vtp = state.log.getMutable<VariadicTypePack>(tail))
                 {
+                    loopCount = 0;
+
                     // Function is variadic and requires that all subsequent parameters
                     // be compatible with a type.
                     while (paramIter != endIter)
                     {
                         state.tryUnify(vtp->ty, *paramIter);
                         ++paramIter;
+
+                        if (exceedsLoopCount())
+                            return;
                     }
 
                     return;
@@ -4117,10 +4224,16 @@ void TypeChecker::checkArgumentList(
                 {
                     std::vector<TypeId> rest;
                     rest.reserve(std::distance(paramIter, endIter));
+
+                    loopCount = 0;
+
                     while (paramIter != endIter)
                     {
                         rest.push_back(*paramIter);
                         ++paramIter;
+
+                        if (exceedsLoopCount())
+                            return;
                     }
 
                     TypePackId varPack = addTypePack(TypePackVar{TypePack{rest, paramIter.tail()}});
@@ -4164,12 +4277,17 @@ void TypeChecker::checkArgumentList(
             // too many parameters passed
             if (!paramIter.tail())
             {
+                loopCount = 0;
+
                 while (argIter != endIter)
                 {
                     // The use of unify here is deliberate. We don't want this unification
                     // to be undoable.
                     unify(errorRecoveryType(scope), *argIter, scope, state.location);
                     ++argIter;
+
+                    if (exceedsLoopCount())
+                        return;
                 }
                 reportCountMismatchError();
                 return;
@@ -4183,6 +4301,8 @@ void TypeChecker::checkArgumentList(
             }
             else if (auto vtp = state.log.getMutable<VariadicTypePack>(tail))
             {
+                loopCount = 0;
+
                 // Function is variadic and requires that all subsequent parameters
                 // be compatible with a type.
                 size_t argIndex = paramIndex;
@@ -4198,12 +4318,17 @@ void TypeChecker::checkArgumentList(
 
                     ++argIter;
                     ++argIndex;
+
+                    if (exceedsLoopCount())
+                        return;
                 }
 
                 return;
             }
             else if (state.log.getMutable<FreeTypePack>(tail))
             {
+                loopCount = 0;
+
                 // Create a type pack out of the remaining argument types
                 // and unify it with the tail.
                 std::vector<TypeId> rest;
@@ -4212,7 +4337,10 @@ void TypeChecker::checkArgumentList(
                 {
                     rest.push_back(*argIter);
                     ++argIter;
-                }
+
+                    if (exceedsLoopCount())
+                        return;
+        }
 
                 TypePackId varPack = addTypePack(TypePackVar{TypePack{rest, argIter.tail()}});
                 state.tryUnify(varPack, tail);

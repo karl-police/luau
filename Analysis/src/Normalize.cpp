@@ -17,15 +17,12 @@
 
 LUAU_FASTFLAGVARIABLE(DebugLuauCheckNormalizeInvariant)
 
-LUAU_FASTFLAGVARIABLE(LuauNormalizeNegatedErrorToAnError)
-LUAU_FASTFLAGVARIABLE(LuauNormalizeIntersectErrorToAnError)
 LUAU_FASTINTVARIABLE(LuauNormalizeCacheLimit, 100000)
 LUAU_FASTINTVARIABLE(LuauNormalizeIntersectionLimit, 200)
 LUAU_FASTINTVARIABLE(LuauNormalizeUnionLimit, 100)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAGVARIABLE(LuauFixInfiniteRecursionInNormalization)
-LUAU_FASTFLAGVARIABLE(LuauNormalizedBufferIsNotUnknown)
-LUAU_FASTFLAGVARIABLE(LuauNormalizeLimitFunctionSet)
+LUAU_FASTFLAGVARIABLE(LuauNormalizationCatchMetatableCycles)
 
 namespace Luau
 {
@@ -307,9 +304,7 @@ bool NormalizedType::isUnknown() const
 
     // Otherwise, we can still be unknown!
     bool hasAllPrimitives = isPrim(booleans, PrimitiveType::Boolean) && isPrim(nils, PrimitiveType::NilType) && isNumber(numbers) &&
-                            strings.isString() &&
-                            (FFlag::LuauNormalizedBufferIsNotUnknown ? isThread(threads) && isBuffer(buffers)
-                                                                     : isPrim(threads, PrimitiveType::Thread) && isThread(threads));
+                            strings.isString() && isThread(threads) && isBuffer(buffers);
 
     // Check is class
     bool isTopClass = false;
@@ -1690,12 +1685,9 @@ NormalizationResult Normalizer::unionNormals(NormalizedType& here, const Normali
             return res;
     }
 
-    if (FFlag::LuauNormalizeLimitFunctionSet)
-    {
-        // Limit based on worst-case expansion of the function unions
-        if (here.functions.parts.size() * there.functions.parts.size() >= size_t(FInt::LuauNormalizeUnionLimit))
-            return NormalizationResult::HitLimits;
-    }
+    // Limit based on worst-case expansion of the function unions
+    if (here.functions.parts.size() * there.functions.parts.size() >= size_t(FInt::LuauNormalizeUnionLimit))
+        return NormalizationResult::HitLimits;
 
     here.booleans = unionOfBools(here.booleans, there.booleans);
     unionClasses(here.classes, there.classes);
@@ -3086,11 +3078,8 @@ NormalizationResult Normalizer::intersectNormals(NormalizedType& here, const Nor
     if (here.tables.size() * there.tables.size() >= size_t(FInt::LuauNormalizeIntersectionLimit))
         return NormalizationResult::HitLimits;
 
-    if (FFlag::LuauNormalizeLimitFunctionSet)
-    {
-        if (here.functions.parts.size() * there.functions.parts.size() >= size_t(FInt::LuauNormalizeIntersectionLimit))
-            return NormalizationResult::HitLimits;
-    }
+    if (here.functions.parts.size() * there.functions.parts.size() >= size_t(FInt::LuauNormalizeIntersectionLimit))
+        return NormalizationResult::HitLimits;
 
     here.booleans = intersectionOfBools(here.booleans, there.booleans);
 
@@ -3227,7 +3216,7 @@ NormalizationResult Normalizer::intersectNormalWithTy(
     {
         TypeId errors = here.errors;
         clearNormal(here);
-        here.errors = FFlag::LuauNormalizeIntersectErrorToAnError && get<ErrorType>(errors) ? errors : there;
+        here.errors = get<ErrorType>(errors) ? errors : there;
     }
     else if (const PrimitiveType* ptv = get<PrimitiveType>(there))
     {
@@ -3324,12 +3313,12 @@ NormalizationResult Normalizer::intersectNormalWithTy(
             clearNormal(here);
             return NormalizationResult::True;
         }
-        else if (FFlag::LuauNormalizeNegatedErrorToAnError && get<ErrorType>(t))
+        else if (get<ErrorType>(t))
         {
             // ~error is still an error, so intersecting with the negation is the same as intersecting with a type
             TypeId errors = here.errors;
             clearNormal(here);
-            here.errors = FFlag::LuauNormalizeIntersectErrorToAnError && get<ErrorType>(errors) ? errors : t;
+            here.errors = get<ErrorType>(errors) ? errors : t;
         }
         else if (auto nt = get<NegationType>(t))
         {
@@ -3363,7 +3352,7 @@ NormalizationResult Normalizer::intersectNormalWithTy(
     return NormalizationResult::True;
 }
 
-void makeTableShared(TypeId ty)
+void makeTableShared_DEPRECATED(TypeId ty)
 {
     ty = follow(ty);
     if (auto tableTy = getMutable<TableType>(ty))
@@ -3373,9 +3362,33 @@ void makeTableShared(TypeId ty)
     }
     else if (auto metatableTy = get<MetatableType>(ty))
     {
-        makeTableShared(metatableTy->metatable);
-        makeTableShared(metatableTy->table);
+        makeTableShared_DEPRECATED(metatableTy->metatable);
+        makeTableShared_DEPRECATED(metatableTy->table);
     }
+}
+
+void makeTableShared(TypeId ty, DenseHashSet<TypeId>& seen)
+{
+    ty = follow(ty);
+    if (seen.contains(ty))
+        return;
+    seen.insert(ty);
+    if (auto tableTy = getMutable<TableType>(ty))
+    {
+        for (auto& [_, prop] : tableTy->props)
+            prop.makeShared();
+    }
+    else if (auto metatableTy = get<MetatableType>(ty))
+    {
+        makeTableShared(metatableTy->metatable, seen);
+        makeTableShared(metatableTy->table, seen);
+    }
+}
+
+void makeTableShared(TypeId ty)
+{
+    DenseHashSet<TypeId> seen{nullptr};
+    makeTableShared(ty, seen);
 }
 
 // -------- Convert back from a normalized type to a type
@@ -3477,7 +3490,10 @@ TypeId Normalizer::typeFromNormal(const NormalizedType& norm)
         result.reserve(result.size() + norm.tables.size());
         for (auto table : norm.tables)
         {
-            makeTableShared(table);
+            if (FFlag::LuauNormalizationCatchMetatableCycles)
+                makeTableShared(table);
+            else
+                makeTableShared_DEPRECATED(table);
             result.push_back(table);
         }
     }

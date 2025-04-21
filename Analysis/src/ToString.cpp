@@ -21,6 +21,7 @@
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAGVARIABLE(LuauSyntheticErrors)
+LUAU_FASTFLAGVARIABLE(LuauStringPartLengthLimit)
 
 /*
  * Enables increasing levels of verbosity for Luau type names when stringifying.
@@ -301,6 +302,28 @@ struct StringifierState
         emit(std::to_string(i).c_str());
     }
 
+    void emit(Polarity p)
+    {
+        switch (p)
+        {
+        case Polarity::None:
+            emit("  ");
+            break;
+        case Polarity::Negative:
+            emit(" -");
+            break;
+        case Polarity::Positive:
+            emit("+ ");
+            break;
+        case Polarity::Mixed:
+            emit("+-");
+            break;
+        default:
+            emit("!!");
+            break;
+        }
+    }
+
     void indent()
     {
         indentation += 4;
@@ -482,6 +505,8 @@ struct TypeStringifier
             {
                 state.emit("'");
                 state.emit(state.getName(ty));
+                if (FInt::DebugLuauVerboseTypeNames >= 1)
+                    state.emit(ftv.polarity);
             }
             else
             {
@@ -493,6 +518,9 @@ struct TypeStringifier
                 }
                 state.emit("'");
                 state.emit(state.getName(ty));
+
+                if (FInt::DebugLuauVerboseTypeNames >= 1)
+                    state.emit(ftv.polarity);
 
                 if (!get<UnknownType>(upperBound))
                 {
@@ -508,6 +536,9 @@ struct TypeStringifier
             state.emit("free-");
 
         state.emit(state.getName(ty));
+
+        if (FFlag::LuauSolverV2 && FInt::DebugLuauVerboseTypeNames >= 1)
+            state.emit(ftv.polarity);
 
         if (FInt::DebugLuauVerboseTypeNames >= 2)
         {
@@ -537,6 +568,9 @@ struct TypeStringifier
         }
         else
             state.emit(state.getName(ty));
+
+        if (FInt::DebugLuauVerboseTypeNames >= 1)
+            state.emit(gtv.polarity);
 
         if (FInt::DebugLuauVerboseTypeNames >= 2)
         {
@@ -877,6 +911,9 @@ struct TypeStringifier
         bool hasNonNilDisjunct = false;
 
         std::vector<std::string> results = {};
+        size_t resultsLength = 0;
+        bool lengthLimitHit = false;
+
         for (auto el : &uv)
         {
             el = follow(el);
@@ -903,14 +940,34 @@ struct TypeStringifier
             if (needParens)
                 state.emit(")");
 
+            if (FFlag::LuauStringPartLengthLimit)
+                resultsLength += state.result.name.length();
+
             results.push_back(std::move(state.result.name));
+
             state.result.name = std::move(saved);
+
+            if (FFlag::LuauStringPartLengthLimit)
+            {
+                lengthLimitHit = state.opts.maxTypeLength > 0 && resultsLength > state.opts.maxTypeLength;
+
+                if (lengthLimitHit)
+                    break;
+            }
         }
 
         state.unsee(&uv);
 
-        if (!FFlag::DebugLuauToStringNoLexicalSort)
-            std::sort(results.begin(), results.end());
+        if (FFlag::LuauStringPartLengthLimit)
+        {
+            if (!lengthLimitHit && !FFlag::DebugLuauToStringNoLexicalSort)
+                std::sort(results.begin(), results.end());
+        }
+        else
+        {
+            if (!FFlag::DebugLuauToStringNoLexicalSort)
+                std::sort(results.begin(), results.end());
+        }
 
         if (optional && results.size() > 1)
             state.emit("(");
@@ -954,6 +1011,9 @@ struct TypeStringifier
         }
 
         std::vector<std::string> results = {};
+        size_t resultsLength = 0;
+        bool lengthLimitHit = false;
+
         for (auto el : uv.parts)
         {
             el = follow(el);
@@ -970,14 +1030,34 @@ struct TypeStringifier
             if (needParens)
                 state.emit(")");
 
+            if (FFlag::LuauStringPartLengthLimit)
+                resultsLength += state.result.name.length();
+
             results.push_back(std::move(state.result.name));
+
             state.result.name = std::move(saved);
+
+            if (FFlag::LuauStringPartLengthLimit)
+            {
+                lengthLimitHit = state.opts.maxTypeLength > 0 && resultsLength > state.opts.maxTypeLength;
+
+                if (lengthLimitHit)
+                    break;
+            }
         }
 
         state.unsee(&uv);
 
-        if (!FFlag::DebugLuauToStringNoLexicalSort)
-            std::sort(results.begin(), results.end());
+        if (FFlag::LuauStringPartLengthLimit)
+        {
+            if (!lengthLimitHit && !FFlag::DebugLuauToStringNoLexicalSort)
+                std::sort(results.begin(), results.end());
+        }
+        else
+        {
+            if (!FFlag::DebugLuauToStringNoLexicalSort)
+                std::sort(results.begin(), results.end());
+        }
 
         bool first = true;
         bool shouldPlaceOnNewlines = results.size() > state.opts.compositeTypesSingleLineLimit || isOverloadedFunction(ty);
@@ -1222,6 +1302,9 @@ struct TypePackStringifier
             state.emit(state.getName(tp));
         }
 
+        if (FInt::DebugLuauVerboseTypeNames >= 1)
+            state.emit(pack.polarity);
+
         if (FInt::DebugLuauVerboseTypeNames >= 2)
         {
             state.emit("-");
@@ -1240,6 +1323,9 @@ struct TypePackStringifier
         if (FInt::DebugLuauVerboseTypeNames >= 1)
             state.emit("free-");
         state.emit(state.getName(tp));
+
+        if (FInt::DebugLuauVerboseTypeNames >= 1)
+            state.emit(pack.polarity);
 
         if (FInt::DebugLuauVerboseTypeNames >= 2)
         {
