@@ -20,17 +20,24 @@ LUAU_FASTFLAG(LuauFixLocationSpanTableIndexExpr)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
 LUAU_FASTINT(LuauCheckRecursionLimit)
-LUAU_FASTFLAG(LuauGlobalSelfAssignmentCycle)
 LUAU_FASTINT(LuauNormalizeCacheLimit)
 LUAU_FASTINT(LuauRecursionLimit)
+LUAU_FASTINT(LuauTypeInferTypePackLoopLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTFLAG(LuauAstTypeGroup3)
 LUAU_FASTFLAG(LuauNewNonStrictWarnOnUnknownGlobals)
-LUAU_FASTFLAG(LuauInferLocalTypesInMultipleAssignments)
-LUAU_FASTFLAG(LuauUnifyMetatableWithAny)
-LUAU_FASTFLAG(LuauExtraFollows)
 LUAU_FASTFLAG(LuauImproveTypePathsInErrors)
 LUAU_FASTFLAG(LuauTypeCheckerAcceptNumberConcats)
+LUAU_FASTFLAG(LuauPreprocessTypestatedArgument)
+LUAU_FASTFLAG(LuauCacheInferencePerAstExpr)
+LUAU_FASTFLAG(LuauLimitIterationWhenCheckingArgumentCounts)
+LUAU_FASTFLAG(LuauMagicFreezeCheckBlocked)
+LUAU_FASTFLAG(LuauTrackInteriorFreeTypesOnScope)
+LUAU_FASTFLAG(LuauNonReentrantGeneralization2)
+LUAU_FASTFLAG(LuauOptimizeFalsyAndTruthyIntersect)
+LUAU_FASTFLAG(LuauHasPropProperBlock)
+LUAU_FASTFLAG(LuauStringPartLengthLimit)
+LUAU_FASTFLAG(LuauSimplificationRecheckAssumption)
 
 using namespace Luau;
 
@@ -430,14 +437,15 @@ TEST_CASE_FIXTURE(Fixture, "check_block_recursion_limit")
 TEST_CASE_FIXTURE(Fixture, "check_expr_recursion_limit")
 {
 #if defined(LUAU_ENABLE_ASAN)
-    int limit = 250;
+    int limit = 200;
 #elif defined(_DEBUG) || defined(_NOOPT)
-    int limit = 300;
+    int limit = 250;
 #else
-    int limit = 600;
+    int limit = 500;
 #endif
     ScopedFastInt luauRecursionLimit{FInt::LuauRecursionLimit, limit + 100};
     ScopedFastInt luauCheckRecursionLimit{FInt::LuauCheckRecursionLimit, limit - 100};
+    ScopedFastFlag _{FFlag::LuauNonReentrantGeneralization2, false};
 
     CheckResult result = check(R"(("foo"))" + rep(":lower()", limit));
 
@@ -1817,7 +1825,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "infer_types_of_globals")
 TEST_CASE_FIXTURE(Fixture, "multiple_assignment")
 {
     ScopedFastFlag sff_LuauSolverV2{FFlag::LuauSolverV2, true};
-    ScopedFastFlag sff_InferLocalTypesInMultipleAssignments{FFlag::LuauInferLocalTypesInMultipleAssignments, true};
 
     CheckResult result = check(R"(
         local function requireString(arg: string) end
@@ -1837,8 +1844,6 @@ TEST_CASE_FIXTURE(Fixture, "multiple_assignment")
 
 TEST_CASE_FIXTURE(Fixture, "fuzz_global_self_assignment")
 {
-    ScopedFastFlag luauGlobalSelfAssignmentCycle{FFlag::LuauGlobalSelfAssignmentCycle, true};
-
     // Shouldn't assert or crash
     check(R"(
         _ = _
@@ -1848,8 +1853,6 @@ TEST_CASE_FIXTURE(Fixture, "fuzz_global_self_assignment")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "getmetatable_works_with_any")
 {
-    ScopedFastFlag _{FFlag::LuauUnifyMetatableWithAny, true};
-
     LUAU_REQUIRE_NO_ERRORS(check(R"(
         return {
             new = function(name: string)
@@ -1867,8 +1870,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "getmetatable_works_with_any")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "getmetatable_infer_any_ret")
 {
-    ScopedFastFlag _{FFlag::LuauUnifyMetatableWithAny, true};
-
     LUAU_REQUIRE_NO_ERRORS(check(R"(
         local function spooky(x: any)
             return getmetatable(x)
@@ -1880,10 +1881,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "getmetatable_infer_any_ret")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "getmetatable_infer_any_param")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::LuauSolverV2, true},
-        {FFlag::LuauUnifyMetatableWithAny, true},
-    };
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
 
     auto result = check(R"(
         local function check(x): any
@@ -1891,15 +1889,12 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "getmetatable_infer_any_param")
         end
     )");
 
-    // CLI-144695: We're leaking the `MT` generic here, this happens regardless
-    // of if `LuauUnifyMetatableWithAny` is set.
+    // CLI-144695: We're leaking the `MT` generic here.
     CHECK_EQ("({ @metatable MT, {+  +} }) -> any", toString(requireType("check")));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "fuzzer_pack_check_missing_follow")
 {
-    ScopedFastFlag luauExtraFollows{FFlag::LuauExtraFollows, true};
-
     // Shouldn't assert or crash
     check(R"(
 _ = n255
@@ -1912,8 +1907,6 @@ end
 
 TEST_CASE_FIXTURE(Fixture, "fuzzer_unify_with_free_missing_follow")
 {
-    ScopedFastFlag luauExtraFollows{FFlag::LuauExtraFollows, true};
-
     // Shouldn't assert or crash
     check(R"(
 for _ in ... do
@@ -1946,5 +1939,198 @@ TEST_CASE_FIXTURE(Fixture, "concat_string_with_string_union")
     )"));
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_local_before_declaration_ice")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauPreprocessTypestatedArgument, true},
+    };
+
+    CheckResult result = check(R"(
+        local _
+        table.freeze(_, _)
+    )");
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    auto err0 = get<TypeMismatch>(result.errors[0]);
+    CHECK(err0);
+    CHECK_EQ("nil", toString(err0->givenType));
+    CHECK_EQ("table", toString(err0->wantedType));
+    auto err1 = get<CountMismatch>(result.errors[1]);
+    CHECK(err1);
+    CHECK_EQ(1, err1->expected);
+    CHECK_EQ(2, err1->actual);
+}
+
+TEST_CASE_FIXTURE(Fixture, "fuzz_dont_double_solve_compound_assignment" * doctest::timeout(1.0))
+{
+    ScopedFastFlag sffs[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauCacheInferencePerAstExpr, true}};
+
+    CheckResult result = check(R"(
+        local _ = {}
+        _[function<t0...>(...)
+            _[function(...)
+                _[_] %= _
+                _ = {}
+                _ = (- _)()
+            end] %= _
+            _[_] %= _
+        end] %= true
+    )");
+
+    LUAU_REQUIRE_ERRORS(result);
+    LUAU_REQUIRE_NO_ERROR(result, ConstraintSolvingIncompleteError);
+}
+
+TEST_CASE_FIXTURE(Fixture, "assert_allows_singleton_union_or_intersection")
+{
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        local x = 42 :: | number
+        local y = 42 :: & number
+    )"));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "assert_table_freeze_constraint_solving")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauMagicFreezeCheckBlocked, true}
+    };
+    LUAU_REQUIRE_NO_ERRORS(check(R"(
+        local f = table.freeze
+        f(table)
+    )"));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_assert_table_freeze_constraint_solving")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauMagicFreezeCheckBlocked, true}
+    };
+    // This is the original fuzzer version of the above issue.
+    CheckResult results = check(R"(
+        local function l0()
+        end
+        for l0 in false do
+        _ = (if _ then table)
+        repeat
+        do end
+        _:freeze(table)
+        until if _ then {{n0=_,},(_:freeze()._[_]),}
+        end
+    )");
+    LUAU_REQUIRE_ERRORS(results);
+    LUAU_REQUIRE_NO_ERROR(results, ConstraintSolvingIncompleteError);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "konnichiwa" * doctest::timeout(0.25))
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, false},
+        {FFlag::LuauInstantiateInSubtyping, true},
+        {FFlag::LuauLimitIterationWhenCheckingArgumentCounts, true},
+    };
+
+    ScopedFastInt sfi{FInt::LuauTypeInferTypePackLoopLimit, 100};
+
+    CheckResult result = check(R"(pcall(table.unpack({pcall})))");
+
+    LUAU_REQUIRE_ERROR(result, CodeTooComplex);
+}
+
+TEST_CASE_FIXTURE(Fixture, "fuzz_generalize_one_remove_type_assert")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauTrackInteriorFreeTypesOnScope, true},
+        {FFlag::LuauHasPropProperBlock, true},
+        {FFlag::LuauNonReentrantGeneralization2, true},
+        {FFlag::LuauOptimizeFalsyAndTruthyIntersect, true}
+    };
+
+    auto result = check(R"(
+        local _ = {_ = _}, l0
+        _ += _
+        while _ do
+            while _[_] do
+                if _.n0 then
+                    _ = _
+                else
+                    _ = _
+                    return _
+                end
+                do
+                    while _ do
+                        _, _ = nil
+                    end
+                    return function()
+                    end
+                end
+                while _[_] do
+                    _ = _._VERSION, ""
+                end
+            end
+            local _
+        end
+    )");
+    LUAU_REQUIRE_ERRORS(result);
+    LUAU_REQUIRE_NO_ERROR(result, ConstraintSolvingIncompleteError);
+}
+
+TEST_CASE_FIXTURE(Fixture, "fuzz_generalize_one_remove_type_assert_2")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauTrackInteriorFreeTypesOnScope, true},
+        {FFlag::LuauNonReentrantGeneralization2, true},
+        {FFlag::LuauOptimizeFalsyAndTruthyIntersect, true},
+    };
+
+    CheckResult result = check(R"(
+        local _ = {n0 = _.n0}, -_, _
+        _ += _.n0
+        _ /= _[_]
+        while _.n110 do
+            while _._ do
+                while _ do
+                    while _ do
+                        _ = _
+                    end
+                end
+                while _[_] do
+                    function _()
+                    end
+                end
+            end
+            while ... do
+            end
+        end
+    )");
+    LUAU_REQUIRE_ERRORS(result);
+    LUAU_REQUIRE_NO_ERROR(result, ConstraintSolvingIncompleteError);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_simplify_combinatorial_explosion")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauTrackInteriorFreeTypesOnScope, true},
+        {FFlag::LuauHasPropProperBlock, true},
+        {FFlag::LuauNonReentrantGeneralization2, true},
+        {FFlag::LuauOptimizeFalsyAndTruthyIntersect, true},
+        {FFlag::LuauStringPartLengthLimit, true},
+        {FFlag::LuauSimplificationRecheckAssumption, true},
+    };
+
+    LUAU_REQUIRE_ERRORS(check(R"(
+_ = {[_[`{_ + ...}`]]=_,_,[{_=nil,[_._G]=false,}]={[_[_[_]][_][_ / ...]]=_,[...]=false,_,},[_[_][_][_]]=l255,},""
+local _
+    )"));
+
+    LUAU_REQUIRE_ERRORS(check(R"(
+_ = {[(_G)]=_,[_[_[_]][_[_]][nil][_]]={_G=_,},_[_[_]][_][_],n0={[_]=_,_G=_,},248,}
+local _
+    )"));
+}
 
 TEST_SUITE_END();

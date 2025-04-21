@@ -22,7 +22,8 @@
 #include <algorithm>
 
 LUAU_FASTFLAGVARIABLE(DebugLuauSubtypingCheckPathValidity)
-LUAU_FASTFLAGVARIABLE(LuauSubtypingStopAtNormFail)
+LUAU_FASTINTVARIABLE(LuauSubtypingReasoningLimit, 100)
+LUAU_FASTFLAGVARIABLE(LuauSubtypingEnableReasoningLimit)
 
 namespace Luau
 {
@@ -100,6 +101,9 @@ static SubtypingReasonings mergeReasonings(const SubtypingReasonings& a, const S
             else
                 result.insert(r);
         }
+
+        if (FFlag::LuauSubtypingEnableReasoningLimit && result.size() >= size_t(FInt::LuauSubtypingReasoningLimit))
+            return result;
     }
 
     for (const SubtypingReasoning& r : b)
@@ -116,6 +120,9 @@ static SubtypingReasonings mergeReasonings(const SubtypingReasonings& a, const S
             else
                 result.insert(r);
         }
+
+        if (FFlag::LuauSubtypingEnableReasoningLimit && result.size() >= size_t(FInt::LuauSubtypingReasoningLimit))
+            return result;
     }
 
     return result;
@@ -416,7 +423,7 @@ SubtypingResult Subtyping::isSubtype(TypeId subTy, TypeId superTy, NotNull<Scope
 
     SubtypingResult result = isCovariantWith(env, subTy, superTy, scope);
 
-    if (FFlag::LuauSubtypingStopAtNormFail && result.normalizationTooComplex)
+    if (result.normalizationTooComplex)
     {
         if (result.isCacheable)
             resultCache[{subTy, superTy}] = result;
@@ -602,7 +609,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId sub
         {
             SubtypingResult semantic = isCovariantWith(env, normalizer->normalize(subTy), normalizer->normalize(superTy), scope);
 
-            if (FFlag::LuauSubtypingStopAtNormFail && semantic.normalizationTooComplex)
+            if (semantic.normalizationTooComplex)
             {
                 result = semantic;
             }
@@ -622,7 +629,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId sub
         {
             SubtypingResult semantic = isCovariantWith(env, normalizer->normalize(subTy), normalizer->normalize(superTy), scope);
 
-            if (FFlag::LuauSubtypingStopAtNormFail && semantic.normalizationTooComplex)
+            if (semantic.normalizationTooComplex)
             {
                 result = semantic;
             }
@@ -1102,7 +1109,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId sub
     {
         SubtypingResult next = isCovariantWith(env, subTy, ty, scope);
 
-        if (FFlag::LuauSubtypingStopAtNormFail && next.normalizationTooComplex)
+        if (next.normalizationTooComplex)
             return SubtypingResult{false, /* normalizationTooComplex */ true};
 
         if (next.isSubtype)
@@ -1126,7 +1133,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, const Unio
     {
         subtypings.push_back(isCovariantWith(env, ty, superTy, scope).withSubComponent(TypePath::Index{i++, TypePath::Index::Variant::Union}));
 
-        if (FFlag::LuauSubtypingStopAtNormFail && subtypings.back().normalizationTooComplex)
+        if (subtypings.back().normalizationTooComplex)
             return SubtypingResult{false, /* normalizationTooComplex */ true};
     }
 
@@ -1142,7 +1149,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId sub
     {
         subtypings.push_back(isCovariantWith(env, subTy, ty, scope).withSuperComponent(TypePath::Index{i++, TypePath::Index::Variant::Intersection}));
 
-        if (FFlag::LuauSubtypingStopAtNormFail && subtypings.back().normalizationTooComplex)
+        if (subtypings.back().normalizationTooComplex)
             return SubtypingResult{false, /* normalizationTooComplex */ true};
     }
 
@@ -1158,7 +1165,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, const Inte
     {
         subtypings.push_back(isCovariantWith(env, ty, superTy, scope).withSubComponent(TypePath::Index{i++, TypePath::Index::Variant::Intersection}));
 
-        if (FFlag::LuauSubtypingStopAtNormFail && subtypings.back().normalizationTooComplex)
+        if (subtypings.back().normalizationTooComplex)
             return SubtypingResult{false, /* normalizationTooComplex */ true};
     }
 
@@ -1804,7 +1811,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, const Type
         {
             results.back().orElse(isCovariantWith(env, subTy, superTy, scope));
 
-            if (FFlag::LuauSubtypingStopAtNormFail && results.back().normalizationTooComplex)
+            if (results.back().normalizationTooComplex)
                 return SubtypingResult{false, /* normalizationTooComplex */ true};
         }
     }

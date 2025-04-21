@@ -12,10 +12,9 @@ using namespace Luau;
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauFixInfiniteRecursionInNormalization)
 LUAU_FASTFLAG(LuauImproveTypePathsInErrors)
-LUAU_FASTFLAG(LuauPrecalculateMutatedFreeTypes2)
-LUAU_FASTFLAG(LuauDeferBidirectionalInferenceForTableAssignment)
-LUAU_FASTFLAG(LuauBidirectionalInferenceUpcast)
 LUAU_FASTFLAG(LuauBidirectionalInferenceCollectIndexerTypes)
+LUAU_FASTFLAG(LuauRetainDefinitionAliasLocations)
+LUAU_FASTFLAG(LuauNewNonStrictVisitTypes)
 
 TEST_SUITE_BEGIN("TypeAliases");
 
@@ -257,12 +256,7 @@ TEST_CASE_FIXTURE(Fixture, "dependent_generic_aliases")
 
 TEST_CASE_FIXTURE(Fixture, "mutually_recursive_generic_aliases")
 {
-    ScopedFastFlag sffs[] = {
-        {FFlag::LuauPrecalculateMutatedFreeTypes2, true},
-        {FFlag::LuauDeferBidirectionalInferenceForTableAssignment, true},
-        {FFlag::LuauBidirectionalInferenceUpcast, true},
-        {FFlag::LuauBidirectionalInferenceCollectIndexerTypes, true},
-    };
+    ScopedFastFlag _{FFlag::LuauBidirectionalInferenceCollectIndexerTypes, true};
 
     CheckResult result = check(R"(
         --!strict
@@ -1106,7 +1100,14 @@ TEST_CASE_FIXTURE(Fixture, "typeof_is_not_a_valid_alias_name")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
-    CHECK("Type aliases cannot be named typeof" == toString(result.errors[0]));
+    if (FFlag::LuauSolverV2)
+    {
+        CHECK("typeof cannot be used as an identifier for a type function or alias" == toString(result.errors[0]));
+    }
+    else
+    {
+        CHECK("Type aliases cannot be named typeof" == toString(result.errors[0]));
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "fuzzer_bug_doesnt_crash")
@@ -1187,14 +1188,19 @@ TEST_CASE_FIXTURE(Fixture, "bound_type_in_alias_segfault")
 {
     ScopedFastFlag sff{FFlag::LuauSolverV2, true};
 
-    LUAU_CHECK_NO_ERRORS(check(R"(
+    CheckResult result = check(R"(
         --!nonstrict
-        type Map<T, V> = {[ K]: V}
+        type Map<T, V> = {[K]: V}
         function foo:bar(): Config<any, any> end
         type Config<TSource, TContext> = Map<TSource, TContext> & { fields: FieldConfigMap<any, any>}
-        export type FieldConfig<TSource, TContext, TArgs> = {[ string]: any}
+        export type FieldConfig<TSource, TContext, TArgs> = {[string]: any}
         export type FieldConfigMap<TSource, TContext> = Map<string, FieldConfig<TSource, TContext>>
-    )"));
+    )");
+
+    if (FFlag::LuauNewNonStrictVisitTypes)
+        LUAU_CHECK_ERROR_COUNT(2, result);
+    else
+        LUAU_CHECK_NO_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "gh1632_no_infinite_recursion_in_normalization")
@@ -1224,6 +1230,42 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "gh1632_no_infinite_recursion_in_normalizatio
     )");
 
     LUAU_CHECK_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(Fixture, "exported_alias_location_is_accessible_on_module")
+{
+    ScopedFastFlag sff{FFlag::LuauRetainDefinitionAliasLocations, true};
+
+    CheckResult result = check(R"(
+        export type Value = string
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+
+    auto module = getMainModule();
+    auto tfun = module->exportedTypeBindings.find("Value");
+    REQUIRE(tfun != module->exportedTypeBindings.end());
+    CHECK_EQ(tfun->second.definitionLocation, Location{{1, 8}, {1, 34}});
+}
+
+TEST_CASE_FIXTURE(Fixture, "exported_type_function_location_is_accessible_on_module")
+{
+    ScopedFastFlag flags[] = {
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauRetainDefinitionAliasLocations, true},
+    };
+
+    CheckResult result = check(R"(
+        export type function Apply()
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+
+    auto module = getMainModule();
+    auto tfun = module->exportedTypeBindings.find("Apply");
+    REQUIRE(tfun != module->exportedTypeBindings.end());
+    CHECK_EQ(tfun->second.definitionLocation, Location{{1, 8}, {2, 11}});
 }
 
 TEST_SUITE_END();

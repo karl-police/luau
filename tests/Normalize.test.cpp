@@ -10,14 +10,14 @@
 #include "Luau/Normalize.h"
 #include "Luau/BuiltinDefinitions.h"
 
-LUAU_FASTFLAG(LuauNormalizeNegatedErrorToAnError)
-LUAU_FASTFLAG(LuauNormalizeIntersectErrorToAnError)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTINT(LuauNormalizeIntersectionLimit)
 LUAU_FASTINT(LuauNormalizeUnionLimit)
-LUAU_FASTFLAG(LuauNormalizeLimitFunctionSet)
-LUAU_FASTFLAG(LuauSubtypingStopAtNormFail)
+LUAU_FASTFLAG(LuauNormalizationCatchMetatableCycles)
+LUAU_FASTFLAG(LuauSubtypingEnableReasoningLimit)
+LUAU_FASTFLAG(LuauTypePackDetectCycles)
+LUAU_FASTFLAG(LuauNonReentrantGeneralization2)
 
 using namespace Luau;
 
@@ -601,8 +601,6 @@ TEST_CASE_FIXTURE(NormalizeFixture, "intersect_truthy_expressed_as_intersection"
 
 TEST_CASE_FIXTURE(NormalizeFixture, "intersect_error")
 {
-    ScopedFastFlag luauNormalizeIntersectErrorToAnError{FFlag::LuauNormalizeIntersectErrorToAnError, true};
-
     std::shared_ptr<const NormalizedType> norm = toNormalizedType(R"(string & AAA)", 1);
     REQUIRE(norm);
     CHECK("*error-type*" == toString(normalizer.typeFromNormal(*norm)));
@@ -610,9 +608,6 @@ TEST_CASE_FIXTURE(NormalizeFixture, "intersect_error")
 
 TEST_CASE_FIXTURE(NormalizeFixture, "intersect_not_error")
 {
-    ScopedFastFlag luauNormalizeIntersectErrorToAnError{FFlag::LuauNormalizeIntersectErrorToAnError, true};
-    ScopedFastFlag luauNormalizeNegatedErrorToAnError{FFlag::LuauNormalizeNegatedErrorToAnError, true};
-
     std::shared_ptr<const NormalizedType> norm = toNormalizedType(R"(string & Not<)", 1);
     REQUIRE(norm);
     CHECK("*error-type*" == toString(normalizer.typeFromNormal(*norm)));
@@ -1072,6 +1067,19 @@ TEST_CASE_FIXTURE(NormalizeFixture, "free_type_and_not_truthy")
     CHECK("'a & (false?)" == toString(result));
 }
 
+TEST_CASE_FIXTURE(NormalizeFixture, "normalize_recursive_metatable")
+{
+    ScopedFastFlag sff[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauNormalizationCatchMetatableCycles, true}};
+
+    TypeId root = arena.addType(BlockedType{});
+    TypeId emptyTable = arena.addType(TableType(TableState::Sealed, {}));
+    TypeId metatable = arena.addType(MetatableType{emptyTable, root});
+    emplaceType<BoundType>(asMutable(root), metatable);
+    auto normalized = normalizer.normalize(root);
+    REQUIRE(normalized);
+    CHECK_EQ("t1 where t1 = { @metatable t1, {  } }", toString(normalizer.typeFromNormal(*normalized)));
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "normalizer_should_be_able_to_detect_cyclic_tables_and_not_stack_overflow")
 {
     if (!FFlag::LuauSolverV2)
@@ -1179,10 +1187,9 @@ end
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_limit_function_intersection_complexity")
 {
+    ScopedFastInt luauTypeInferRecursionLimit{FInt::LuauTypeInferRecursionLimit, 80};
     ScopedFastInt luauNormalizeIntersectionLimit{FInt::LuauNormalizeIntersectionLimit, 50};
     ScopedFastInt luauNormalizeUnionLimit{FInt::LuauNormalizeUnionLimit, 20};
-    ScopedFastFlag luauNormalizeLimitFunctionSet{FFlag::LuauNormalizeLimitFunctionSet, true};
-    ScopedFastFlag luauSubtypingStopAtNormFail{FFlag::LuauSubtypingStopAtNormFail, true};
 
     CheckResult result = check(R"(
 function _(_).readu32(l0)
@@ -1194,12 +1201,13 @@ _(_)[_(n32)] %= _(_(_))
     LUAU_REQUIRE_ERRORS(result);
 }
 
+#if !(defined(_WIN32) && !(defined(_M_X64) || defined(_M_ARM64)))
 TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_propagate_normalization_failures")
 {
     ScopedFastInt luauNormalizeIntersectionLimit{FInt::LuauNormalizeIntersectionLimit, 50};
     ScopedFastInt luauNormalizeUnionLimit{FInt::LuauNormalizeUnionLimit, 20};
-    ScopedFastFlag luauNormalizeLimitFunctionSet{FFlag::LuauNormalizeLimitFunctionSet, true};
-    ScopedFastFlag luauSubtypingStopAtNormFail{FFlag::LuauSubtypingStopAtNormFail, true};
+    ScopedFastFlag luauSubtypingEnableReasoningLimit{FFlag::LuauSubtypingEnableReasoningLimit, true};
+    ScopedFastFlag luauTurnOffNonreentrantGeneralization{FFlag::LuauNonReentrantGeneralization2, false};
 
     CheckResult result = check(R"(
 function _(_,"").readu32(l0)
@@ -1210,5 +1218,43 @@ _().readu32 %= _(_(_(_),_))
 
     LUAU_REQUIRE_ERRORS(result);
 }
+#endif
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_flatten_type_pack_cycle")
+{
+    ScopedFastFlag sff[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauTypePackDetectCycles, true}};
+
+    // Note: if this stops throwing an exception, it means we fixed cycle construction and can replace with a regular check
+    CHECK_THROWS_AS(
+        check(R"(
+function _(_).readu32<t0...>()
+repeat
+until function<t4>()
+end
+return if _ then _,_(_)
+end
+_(_(_(_)),``)
+do end
+    )"),
+        InternalCompilerError
+    );
+}
+#if 0
+TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_union_type_pack_cycle")
+{
+    ScopedFastFlag sff[] = {{FFlag::LuauSolverV2, true}, {FFlag::LuauTypePackDetectCycles, true}};
+
+    // Note: if this stops throwing an exception, it means we fixed cycle construction and can replace with a regular check
+    CHECK_THROWS_AS(
+        check(R"(
+function _(_).n0(l32,...)
+return ({n0=_,[_(if _ then _,nil)]=- _,[_(_(_))]=_,})[_],_(_)
+end
+_[_] ^= _(_(_))
+    )"),
+        InternalCompilerError
+    );
+}
+#endif 
 
 TEST_SUITE_END();
