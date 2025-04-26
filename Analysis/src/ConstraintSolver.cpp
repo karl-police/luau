@@ -1684,7 +1684,7 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
 
     instantiatedAliases[signature] = target;
 
-    return false;
+    return true;
 }
 
 void ConstraintSolver::fillInDiscriminantTypes(NotNull<const Constraint> constraint, const std::vector<std::optional<TypeId>>& discriminantTypes)
@@ -1701,7 +1701,6 @@ void ConstraintSolver::fillInDiscriminantTypes(NotNull<const Constraint> constra
         // We also need to unconditionally unblock these types, otherwise
         // you end up with funky looking "Blocked on *no-refine*."
         unblock(*ty, constraint->location);
-
     }
 }
 
@@ -3496,32 +3495,6 @@ struct Blocker : TypeOnceVisitor
     }
 
     bool visit(TypeId ty, const ExternType&) override
-    {
-        return false;
-    }
-};
-
-struct BlockerConstraint : TypeOnceVisitor
-{
-    NotNull<ConstraintSolver> solver;
-    NotNull<const Constraint> constraint;
-
-    bool blocked = false;
-
-    explicit BlockerConstraint(NotNull<ConstraintSolver> solver, NotNull<const Constraint> constraint)
-        : solver(solver)
-        , constraint(constraint)
-    {
-    }
-
-    bool visit(TypeId ty, const PendingExpansionType&) override
-    {
-        blocked = true;
-        solver->block(ty, constraint);
-        return false;
-    }
-
-    bool visit(TypeId ty, const ClassType&) override
     {
         return false;
     }
