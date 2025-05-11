@@ -436,7 +436,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "typefunc_dependency_issue1")
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
-        //{FFlag::DebugLuauGreedyGeneralization, true},
+        {FFlag::DebugLuauGreedyGeneralization, true},
         //{FFlag::DebugLuauMagicTypes, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
