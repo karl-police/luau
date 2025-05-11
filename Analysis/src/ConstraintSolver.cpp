@@ -38,10 +38,10 @@ LUAU_FASTFLAGVARIABLE(LuauHasPropProperBlock)
 LUAU_FASTFLAGVARIABLE(DebugLuauGreedyGeneralization)
 LUAU_FASTFLAG(LuauDeprecatedAttribute)
 LUAU_FASTFLAG(LuauNonReentrantGeneralization2)
-LUAU_FASTFLAG(LuauBidirectionalInferenceCollectIndexerTypes)
 LUAU_FASTFLAG(LuauNewTypeFunReductionChecks2)
 LUAU_FASTFLAGVARIABLE(LuauTrackInferredFunctionTypeFromCall)
 LUAU_FASTFLAGVARIABLE(LuauAddCallConstraintForIterableFunctions)
+LUAU_FASTFLAGVARIABLE(LuauGuardAgainstMalformedTypeAliasExpansion)
 
 namespace Luau
 {
@@ -1227,13 +1227,10 @@ bool ConstraintSolver::tryDispatch(const GeneralizationConstraint& c, NotNull<co
         else
             unify(constraint, generalizedType, *generalizedTy);
 
-        if (FFlag::LuauDeprecatedAttribute)
+        if (FunctionType* fty = getMutable<FunctionType>(follow(generalizedType)))
         {
-            if (FunctionType* fty = getMutable<FunctionType>(follow(generalizedType)))
-            {
-                if (c.hasDeprecatedAttribute)
-                    fty->isDeprecatedFunction = true;
-            }
+            if (c.hasDeprecatedAttribute)
+                fty->isDeprecatedFunction = true;
         }
     }
     else
@@ -1286,6 +1283,23 @@ bool ConstraintSolver::tryDispatch(const GeneralizationConstraint& c, NotNull<co
                     LUAU_ASSERT(isKnown(params.polarity));
                     generalizeTypePack(arena, builtinTypes, constraint->scope, tp, params);
                 }
+            }
+        }
+    }
+
+    if (FFlag::DebugLuauGreedyGeneralization)
+    {
+        if (c.noGenerics)
+        {
+            if (auto ft = getMutable<FunctionType>(c.sourceType))
+            {
+                for (TypeId gen : ft->generics)
+                    asMutable(gen)->ty.emplace<BoundType>(builtinTypes->unknownType);
+                ft->generics.clear();
+
+                for (TypePackId gen : ft->genericPacks)
+                    asMutable(gen)->ty.emplace<BoundTypePack>(builtinTypes->unknownTypePack);
+                ft->genericPacks.clear();
             }
         }
     }
@@ -1570,7 +1584,19 @@ bool ConstraintSolver::tryDispatch(const TypeAliasExpansionConstraint& c, NotNul
     // deterministic.
     if (TypeId* cached = instantiatedAliases.find(signature))
     {
-        bindResult(*cached);
+        // However, we might now be revealing a malformed mutually recursive
+        // alias. `instantiatedAliases` can change from underneath us in a
+        // way that can cause a cached type id to bind to itself if we don't
+        // do this check.
+        if (FFlag::LuauGuardAgainstMalformedTypeAliasExpansion && occursCheck(follow(c.target), *cached))
+        {
+            reportError(OccursCheckFailed{}, constraint->location);
+            bindResult(errorRecoveryType());
+        }
+        else
+        {
+            bindResult(*cached);
+        }
         return true;
     }
 
@@ -1989,45 +2015,13 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
     for (auto generic : ftv->generics)
     {
         replacements[generic] = builtinTypes->unknownType;
-        if (FFlag::LuauBidirectionalInferenceCollectIndexerTypes)
-            containsGenerics.generics.insert(generic);
+        containsGenerics.generics.insert(generic);
     }
 
     for (auto genericPack : ftv->genericPacks)
     {
         replacementPacks[genericPack] = builtinTypes->unknownTypePack;
-        if (FFlag::LuauBidirectionalInferenceCollectIndexerTypes)
-            containsGenerics.generics.insert(genericPack);
-    }
-
-    // If the type of the function has generics, we don't actually want to push any of the generics themselves
-    // into the argument types as expected types because this creates an unnecessary loop. Instead, we want to
-    // replace these types with `unknown` (and `...unknown`) to keep any structure but not create the cycle.
-    if (!FFlag::LuauBidirectionalInferenceCollectIndexerTypes)
-    {
-        if (!replacements.empty() || !replacementPacks.empty())
-        {
-            Replacer replacer{arena, std::move(replacements), std::move(replacementPacks)};
-
-            std::optional<TypeId> res = replacer.substitute(fn);
-            if (res)
-            {
-                if (*res != fn)
-                {
-                    FunctionType* ftvMut = getMutable<FunctionType>(*res);
-                    LUAU_ASSERT(ftvMut);
-                    ftvMut->generics.clear();
-                    ftvMut->genericPacks.clear();
-                }
-
-                fn = *res;
-                ftv = get<FunctionType>(*res);
-                LUAU_ASSERT(ftv);
-
-                // we've potentially copied type functions here, so we need to reproduce their reduce constraint.
-                reproduceConstraints(constraint->scope, constraint->location, replacer);
-            }
-        }
+        containsGenerics.generics.insert(genericPack);
     }
 
     const std::vector<TypeId> expectedArgs = flatten(ftv->argTypes).first;
@@ -2046,7 +2040,7 @@ bool ConstraintSolver::tryDispatch(const FunctionCheckConstraint& c, NotNull<con
         (*c.astExpectedTypes)[expr] = expectedArgTy;
 
         // Generic types are skipped over entirely, for now.
-        if (FFlag::LuauBidirectionalInferenceCollectIndexerTypes && containsGenerics.hasGeneric(expectedArgTy))
+        if (containsGenerics.hasGeneric(expectedArgTy))
             continue;
 
         const FunctionType* expectedLambdaTy = get<FunctionType>(expectedArgTy);
@@ -2226,7 +2220,7 @@ bool ConstraintSolver::tryDispatchHasIndexer(
         return true;
     }
 
-    if (auto ft = get<FreeType>(subjectType))
+    if (auto ft = getMutable<FreeType>(subjectType))
     {
         if (auto tbl = get<TableType>(follow(ft->upperBound)); tbl && tbl->indexer)
         {
@@ -2243,7 +2237,19 @@ bool ConstraintSolver::tryDispatchHasIndexer(
         TypeId upperBound =
             arena->addType(TableType{/* props */ {}, TableIndexer{indexType, resultType}, TypeLevel{}, ft->scope, TableState::Unsealed});
 
-        unify(constraint, subjectType, upperBound);
+        if (FFlag::DebugLuauGreedyGeneralization)
+        {
+            TypeId sr = follow(simplifyIntersection(constraint->scope, constraint->location, ft->upperBound, upperBound));
+
+            if (get<NeverType>(sr))
+                bind(constraint, resultType, builtinTypes->errorType);
+            else
+                ft->upperBound = sr;
+        }
+        else
+        {
+            unify(constraint, subjectType, upperBound);
+        }
 
         return true;
     }
