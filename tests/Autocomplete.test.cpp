@@ -28,7 +28,6 @@ LUAU_FASTFLAG(LuauAutocompleteNewSolverLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 
 LUAU_FASTFLAG(DebugLuauLogTypeFamilies)
-LUAU_FASTFLAG(DebugLuauGreedyGeneralization)
 
 LUAU_FASTFLAG(LuauAutocompleteUnionCopyPreviousSeen)
 LUAU_FASTFLAG(LuauUserTypeFunTypecheck)
@@ -420,7 +419,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
         {FFlag::DebugLuauLogBindings, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
         {FFlag::DebugLuauLogTypeFamilies, true},
-        {FFlag::DebugLuauGreedyGeneralization, true},
+        {FFlag::LuauEagerGeneralization3, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
 
@@ -452,7 +451,7 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "typefunc_dependency_issue1")
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
-        {FFlag::DebugLuauGreedyGeneralization, true},
+        {FFlag::LuauEagerGeneralization3, true},
         //{FFlag::DebugLuauMagicTypes, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
