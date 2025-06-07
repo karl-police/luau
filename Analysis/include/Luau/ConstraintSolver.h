@@ -229,7 +229,7 @@ public:
     bool tryDispatch(const IterableConstraint& c, NotNull<const Constraint> constraint, bool force);
     bool tryDispatch(const NameConstraint& c, NotNull<const Constraint> constraint);
     bool tryDispatch(const TypeAliasExpansionConstraint& c, NotNull<const Constraint> constraint);
-    bool tryDispatch(const FunctionCallConstraint& c, NotNull<const Constraint> constraint);
+    bool tryDispatch(const FunctionCallConstraint& c, NotNull<const Constraint> constraint, bool force);
     bool tryDispatch(const TableCheckConstraint& c, NotNull<const Constraint> constraint);
     bool tryDispatch(const FunctionCheckConstraint& c, NotNull<const Constraint> constraint);
     bool tryDispatch(const PrimitiveTypeConstraint& c, NotNull<const Constraint> constraint, bool force);
@@ -466,6 +466,14 @@ public:
 /** Borrow a vector of pointers from a vector of owning pointers to constraints.
  */
 std::vector<NotNull<Constraint>> borrowConstraints(const std::vector<ConstraintPtr>& constraints);
+
+std::pair<std::vector<TypeId>, std::vector<TypePackId>> saturateArguments(
+    TypeArena* arena,
+    NotNull<BuiltinTypes> builtinTypes,
+    const TypeFun& fn,
+    const std::vector<TypeId>& rawTypeArguments,
+    const std::vector<TypePackId>& rawPackArguments
+);
 
 void dump(NotNull<Scope> rootScope, struct ToStringOptions& opts);
 

@@ -11,6 +11,9 @@
 #include <optional>
 
 #include <string>
+#include <memory>
+
+#include <string>
 #include <string.h>
 
 

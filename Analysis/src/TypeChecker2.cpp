@@ -30,12 +30,14 @@
 
 LUAU_FASTFLAG(DebugLuauMagicTypes)
 
-LUAU_FASTFLAGVARIABLE(LuauTypeCheckerAcceptNumberConcats)
 LUAU_FASTFLAGVARIABLE(LuauTypeCheckerStricterIndexCheck)
 LUAU_FASTFLAG(LuauStoreReturnTypesAsPackOnAst)
+LUAU_FASTFLAG(LuauEnableWriteOnlyProperties)
+LUAU_FASTFLAG(LuauNewNonStrictFixGenericTypePacks)
 LUAU_FASTFLAGVARIABLE(LuauReportSubtypingErrors)
 LUAU_FASTFLAGVARIABLE(LuauSkipMalformedTypeAliases)
 LUAU_FASTFLAGVARIABLE(LuauTableLiteralSubtypeSpecificCheck)
+LUAU_FASTFLAG(LuauSubtypingCheckFunctionGenericCounts)
 
 namespace Luau
 {
@@ -781,7 +783,6 @@ void TypeChecker2::visit(AstStatReturn* ret)
 
     for (AstExpr* expr : ret->list)
         visit(expr, ValueContext::RValue);
-
 }
 
 void TypeChecker2::visit(AstStatExpr* expr)
@@ -1408,14 +1409,18 @@ void TypeChecker2::visit(AstExprConstantBool* expr)
     const TypeId inferredType = lookupType(expr);
     NotNull<Scope> scope{findInnermostScope(expr->location)};
 
-    const SubtypingResult r = subtyping->isSubtype(bestType, inferredType, scope);
+    SubtypingResult r = subtyping->isSubtype(bestType, inferredType, scope);
     if (FFlag::LuauReportSubtypingErrors)
     {
         if (!isErrorSuppressing(expr->location, inferredType))
         {
             if (!r.isSubtype)
                 reportError(TypeMismatch{inferredType, bestType}, expr->location);
-
+            if (FFlag::LuauSubtypingCheckFunctionGenericCounts)
+            {
+                for (auto& e : r.errors)
+                    e.location = expr->location;
+            }
             reportErrors(r.errors);
         }
     }
@@ -1446,14 +1451,18 @@ void TypeChecker2::visit(AstExprConstantString* expr)
     const TypeId inferredType = lookupType(expr);
     NotNull<Scope> scope{findInnermostScope(expr->location)};
 
-    const SubtypingResult r = subtyping->isSubtype(bestType, inferredType, scope);
+    SubtypingResult r = subtyping->isSubtype(bestType, inferredType, scope);
     if (FFlag::LuauReportSubtypingErrors)
     {
         if (!isErrorSuppressing(expr->location, inferredType))
         {
             if (!r.isSubtype)
                 reportError(TypeMismatch{inferredType, bestType}, expr->location);
-
+            if (FFlag::LuauSubtypingCheckFunctionGenericCounts)
+            {
+                for (auto& e : r.errors)
+                    e.location = expr->location;
+            }
             reportErrors(r.errors);
         }
     }
@@ -1532,7 +1541,12 @@ void TypeChecker2::visitCall(AstExprCall* call)
         if (FFlag::LuauReportSubtypingErrors)
         {
             if (!isErrorSuppressing(call->location, *selectedOverloadTy))
-                reportErrors(std::move(result.errors));
+                if (FFlag::LuauSubtypingCheckFunctionGenericCounts)
+                {
+                    for (auto& e : result.errors)
+                        e.location = call->location;
+                }
+            reportErrors(std::move(result.errors));
         }
 
         if (result.normalizationTooComplex)
@@ -2358,18 +2372,9 @@ TypeId TypeChecker2::visit(AstExprBinary* expr, AstNode* overrideKey)
         return builtinTypes->numberType;
     case AstExprBinary::Op::Concat:
     {
-        if (FFlag::LuauTypeCheckerAcceptNumberConcats)
-        {
-            const TypeId numberOrString = module->internalTypes.addType(UnionType{{builtinTypes->numberType, builtinTypes->stringType}});
-            testIsSubtype(leftType, numberOrString, expr->left->location);
-            testIsSubtype(rightType, numberOrString, expr->right->location);
-        }
-        else
-        {
-            testIsSubtype(leftType, builtinTypes->stringType, expr->left->location);
-            testIsSubtype(rightType, builtinTypes->stringType, expr->right->location);
-        }
-
+        const TypeId numberOrString = module->internalTypes.addType(UnionType{{builtinTypes->numberType, builtinTypes->stringType}});
+        testIsSubtype(leftType, numberOrString, expr->left->location);
+        testIsSubtype(rightType, numberOrString, expr->right->location);
         return builtinTypes->stringType;
     }
     case AstExprBinary::Op::CompareGe:
@@ -2795,22 +2800,41 @@ void TypeChecker2::visit(AstTypePackGeneric* tp)
     Scope* scope = findInnermostScope(tp->location);
     LUAU_ASSERT(scope);
 
-    std::optional<TypePackId> alias = scope->lookupPack(tp->genericName.value);
-    if (!alias.has_value())
+    if (FFlag::LuauNewNonStrictFixGenericTypePacks)
     {
+        if (std::optional<TypePackId> alias = scope->lookupPack(tp->genericName.value))
+            return;
+
         if (scope->lookupType(tp->genericName.value))
-        {
-            reportError(
+            return reportError(
                 SwappedGenericTypeParameter{
                     tp->genericName.value,
                     SwappedGenericTypeParameter::Kind::Pack,
                 },
                 tp->location
             );
-        }
-        else
+
+        reportError(UnknownSymbol{tp->genericName.value, UnknownSymbol::Context::Type}, tp->location);
+    }
+    else
+    {
+        std::optional<TypePackId> alias = scope->lookupPack(tp->genericName.value);
+        if (!alias.has_value())
         {
-            reportError(UnknownSymbol{tp->genericName.value, UnknownSymbol::Context::Type}, tp->location);
+            if (scope->lookupType(tp->genericName.value))
+            {
+                reportError(
+                    SwappedGenericTypeParameter{
+                        tp->genericName.value,
+                        SwappedGenericTypeParameter::Kind::Pack,
+                    },
+                    tp->location
+                );
+            }
+            else
+            {
+                reportError(UnknownSymbol{tp->genericName.value, UnknownSymbol::Context::Type}, tp->location);
+            }
         }
     }
 }
@@ -2943,14 +2967,6 @@ void TypeChecker2::explainError(TypePackId subTy, TypePackId superTy, Location l
         reportError(TypePackMismatch{superTy, subTy, reasonings.toString()}, location);
 }
 
-namespace
-{
-bool isRecord(const AstExprTable::Item& item)
-{
-    return item.kind == AstExprTable::Item::Record || (item.kind == AstExprTable::Item::General && item.key->is<AstExprConstantString>());
-}
-}
-
 bool TypeChecker2::testPotentialLiteralIsSubtype(AstExpr* expr, TypeId expectedType)
 {
     auto exprType = follow(lookupType(expr));
@@ -2981,13 +2997,25 @@ bool TypeChecker2::testPotentialLiteralIsSubtype(AstExpr* expr, TypeId expectedT
         return testIsSubtype(exprType, expectedType, expr->location);
     }
 
-    Set<std::optional<std::string> > missingKeys{{}};
+    Set<std::optional<std::string>> missingKeys{{}};
     for (const auto& [name, prop] : expectedTableType->props)
     {
-        LUAU_ASSERT(!prop.isWriteOnly());
-        auto readTy = *prop.readTy;
-        if (!isOptional(readTy))
-            missingKeys.insert(name);
+        if (FFlag::LuauEnableWriteOnlyProperties)
+        {
+            if (prop.readTy)
+            {
+                if (!isOptional(*prop.readTy))
+                    missingKeys.insert(name);
+            }
+        }
+        else
+        {
+            LUAU_ASSERT(!prop.isWriteOnly());
+
+            auto readTy = *prop.readTy;
+            if (!isOptional(readTy))
+                missingKeys.insert(name);
+        }
     }
 
     bool isArrayLike = false;
@@ -3023,11 +3051,25 @@ bool TypeChecker2::testPotentialLiteralIsSubtype(AstExpr* expr, TypeId expectedT
             }
             else
             {
-                // TODO: What do we do for write only props?
-                LUAU_ASSERT(expectedIt->second.readTy);
-                // Some property is in the expected type: we can test against the specific type.
-                module->astExpectedTypes[item.value] = *expectedIt->second.readTy;
-                isSubtype &= testPotentialLiteralIsSubtype(item.value, *expectedIt->second.readTy);
+                if (FFlag::LuauEnableWriteOnlyProperties)
+                {
+                    // If the type has a read type, then we have an expected type for it, otherwise, we actually don't
+                    // care what's assigned to it because the only allowed behavior is writing to that property.
+
+                    if (expectedIt->second.readTy)
+                    {
+                        module->astExpectedTypes[item.value] = *expectedIt->second.readTy;
+                        isSubtype &= testPotentialLiteralIsSubtype(item.value, *expectedIt->second.readTy);
+                    }
+                }
+                else
+                {
+                    // TODO: What do we do for write only props?
+                    LUAU_ASSERT(expectedIt->second.readTy);
+                    // Some property is in the expected type: we can test against the specific type.
+                    module->astExpectedTypes[item.value] = *expectedIt->second.readTy;
+                    isSubtype &= testPotentialLiteralIsSubtype(item.value, *expectedIt->second.readTy);
+                }
             }
         }
         else if (item.kind == AstExprTable::Item::List)
@@ -3075,7 +3117,12 @@ bool TypeChecker2::testIsSubtype(TypeId subTy, TypeId superTy, Location location
     if (FFlag::LuauReportSubtypingErrors)
     {
         if (!isErrorSuppressing(location, subTy))
-            reportErrors(std::move(r.errors));
+            if (FFlag::LuauSubtypingCheckFunctionGenericCounts)
+            {
+                for (auto& e : r.errors)
+                    e.location = location;
+            }
+        reportErrors(std::move(r.errors));
     }
 
     if (r.normalizationTooComplex)
@@ -3095,7 +3142,12 @@ bool TypeChecker2::testIsSubtype(TypePackId subTy, TypePackId superTy, Location 
     if (FFlag::LuauReportSubtypingErrors)
     {
         if (!isErrorSuppressing(location, subTy))
-            reportErrors(std::move(r.errors));
+            if (FFlag::LuauSubtypingCheckFunctionGenericCounts)
+            {
+                for (auto& e : r.errors)
+                    e.location = location;
+            }
+        reportErrors(std::move(r.errors));
     }
 
     if (r.normalizationTooComplex)

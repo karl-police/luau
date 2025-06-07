@@ -13,8 +13,7 @@
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauAddCallConstraintForIterableFunctions)
-LUAU_FASTFLAG(DebugLuauGreedyGeneralization)
-LUAU_FASTFLAG(LuauOptimizeFalsyAndTruthyIntersect)
+LUAU_FASTFLAG(LuauEagerGeneralization3)
 LUAU_FASTFLAG(LuauClipVariadicAnysFromArgsToGenericFuncs2)
 
 using namespace Luau;
@@ -467,10 +466,9 @@ local b: B.T = a
 
     if (FFlag::LuauSolverV2)
     {
-        const std::string expected =
-            "Type 'T' from 'game/A' could not be converted into 'T' from 'game/B'; \n"
-            "this is because accessing `x` results in `number` in the former type and `string` in the latter type, and "
-            "`number` is not exactly `string`";
+        const std::string expected = "Type 'T' from 'game/A' could not be converted into 'T' from 'game/B'; \n"
+                                     "this is because accessing `x` results in `number` in the former type and `string` in the latter type, and "
+                                     "`number` is not exactly `string`";
         CHECK(expected == toString(result.errors[0]));
     }
     else
@@ -514,10 +512,9 @@ local b: B.T = a
 
     if (FFlag::LuauSolverV2)
     {
-        const std::string expected =
-            "Type 'T' from 'game/B' could not be converted into 'T' from 'game/C'; \n"
-            "this is because accessing `x` results in `number` in the former type and `string` in the latter type, and "
-            "`number` is not exactly `string`";
+        const std::string expected = "Type 'T' from 'game/B' could not be converted into 'T' from 'game/C'; \n"
+                                     "this is because accessing `x` results in `number` in the former type and `string` in the latter type, and "
+                                     "`number` is not exactly `string`";
         CHECK(expected == toString(result.errors[0]));
     }
     else
@@ -748,14 +745,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "spooky_blocked_type_laundered_by_bound_type"
         local _ = require(game.A);
     )");
 
-    if (FFlag::LuauAddCallConstraintForIterableFunctions && !FFlag::LuauOptimizeFalsyAndTruthyIntersect)
-    {
-        LUAU_REQUIRE_ERROR_COUNT(3, result);
-    }
-    else
-    {
-        LUAU_REQUIRE_NO_ERRORS(result);
-    }
+    LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "leaky_generics")
@@ -787,7 +777,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "leaky_generics")
 
     LUAU_REQUIRE_NO_ERRORS(result);
 
-    if (FFlag::DebugLuauGreedyGeneralization)
+    if (FFlag::LuauEagerGeneralization3)
     {
         CHECK_EQ("(unknown) -> unknown", toString(requireTypeAtPosition({13, 23})));
     }
