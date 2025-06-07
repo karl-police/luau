@@ -16,7 +16,7 @@ using namespace Luau;
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauAddCallConstraintForIterableFunctions)
-LUAU_FASTFLAG(LuauSimplifyOutOfLine)
+LUAU_FASTFLAG(LuauSimplifyOutOfLine2)
 LUAU_FASTFLAG(LuauDfgIfBlocksShouldRespectControlFlow)
 LUAU_FASTFLAG(LuauDfgAllowUpdatesInLoops)
 
@@ -188,7 +188,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "for_in_loop_with_next_and_multiple_elements"
 {
     ScopedFastFlag sffs[] = {
         {FFlag::LuauAddCallConstraintForIterableFunctions, true},
-        {FFlag::LuauSimplifyOutOfLine, true},
+        {FFlag::LuauSimplifyOutOfLine2, true},
         {FFlag::LuauDfgAllowUpdatesInLoops, true},
     };
 
@@ -325,9 +325,6 @@ TEST_CASE_FIXTURE(Fixture, "for_in_loop_on_error")
 
 TEST_CASE_FIXTURE(Fixture, "for_in_loop_on_non_function")
 {
-    // We report a spuriouus duplicate error here.
-    DOES_NOT_PASS_NEW_SOLVER_GUARD();
-
     CheckResult result = check(R"(
         local bad_iter = 5
 
@@ -1130,7 +1127,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "dcr_iteration_on_never_gives_never")
     LUAU_REQUIRE_NO_ERRORS(result);
 
     if (FFlag::LuauSolverV2)
-        CHECK("nil" == toString(requireType("ans"))); 
+        CHECK("nil" == toString(requireType("ans")));
     else
         CHECK(toString(requireType("ans")) == "never");
 }
@@ -1404,14 +1401,16 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "oss_1413")
                 local bar = foo - foo + foo
                 foo = bar
             end
-        end    
+        end
     )"));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "while_loop_error_in_body")
 {
+    if (!FFlag::LuauSolverV2)
+        return;
+
     ScopedFastFlag sffs[] = {
-        {FFlag::LuauSolverV2, true},
         {FFlag::LuauDfgAllowUpdatesInLoops, true},
     };
 
@@ -1502,8 +1501,10 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "repeat_unconditionally_fires_error")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "repeat_is_linearish")
 {
+    if (!FFlag::LuauSolverV2)
+        return;
+
     ScopedFastFlag sffs[] = {
-        {FFlag::LuauSolverV2, true},
         {FFlag::LuauDfgIfBlocksShouldRespectControlFlow, true},
         {FFlag::LuauDfgAllowUpdatesInLoops, true},
     };
@@ -1522,7 +1523,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "repeat_is_linearish")
     )"));
 
     CHECK_EQ("nil", toString(requireType("y")));
-
 }
 
 TEST_CASE_FIXTURE(Fixture, "ensure_local_in_loop_does_not_escape")
@@ -1542,7 +1542,6 @@ TEST_CASE_FIXTURE(Fixture, "ensure_local_in_loop_does_not_escape")
     )"));
 
     CHECK_EQ("number", toString(requireType("y")));
-
 }
 
 TEST_SUITE_END();

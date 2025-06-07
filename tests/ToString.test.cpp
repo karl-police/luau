@@ -6,6 +6,7 @@
 #include "Fixture.h"
 
 #include "Luau/TypeChecker2.h"
+#include "Luau/TypePack.h"
 #include "ScopedFlags.h"
 #include "doctest.h"
 
@@ -14,6 +15,7 @@ using namespace Luau;
 LUAU_FASTFLAG(LuauRecursiveTypeParameterRestriction)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAG(LuauAttributeSyntax)
+LUAU_FASTFLAG(LuauFixEmptyTypePackStringification)
 LUAU_FASTFLAG(LuauTableLiteralSubtypeSpecificCheck)
 
 TEST_SUITE_BEGIN("ToString");
@@ -492,6 +494,17 @@ TEST_CASE_FIXTURE(Fixture, "stringifying_array_uses_array_syntax")
     CHECK_EQ("{string}", toString(Type{ttv}));
 }
 
+TEST_CASE_FIXTURE(Fixture, "the_empty_type_pack_should_be_parenthesized")
+{
+    ScopedFastFlag sff{FFlag::LuauFixEmptyTypePackStringification, true};
+
+    TypePackVar emptyTypePack{TypePack{}};
+    CHECK_EQ(toString(&emptyTypePack), "()");
+
+    auto unitToUnit = Type{FunctionType{&emptyTypePack, &emptyTypePack}};
+    CHECK_EQ(toString(&unitToUnit), "() -> ()");
+}
+
 
 TEST_CASE_FIXTURE(Fixture, "generic_packs_are_stringified_differently_from_generic_types")
 {
@@ -865,7 +878,7 @@ TEST_CASE_FIXTURE(Fixture, "tostring_unsee_ttv_if_array")
 
 TEST_CASE_FIXTURE(Fixture, "tostring_error_mismatch")
 {
-    ScopedFastFlag _ {FFlag::LuauTableLiteralSubtypeSpecificCheck, true};
+    ScopedFastFlag _{FFlag::LuauTableLiteralSubtypeSpecificCheck, true};
 
     CheckResult result = check(R"(
         --!strict
@@ -876,26 +889,26 @@ TEST_CASE_FIXTURE(Fixture, "tostring_error_mismatch")
 
     std::string expected;
     if (FFlag::LuauSolverV2)
-        expected =  "Type\n\t"
-                    "'{ a: number, b: string, c: { d: string } }'\n"
-                    "could not be converted into\n\t"
-                    "'{ a: number, b: string, c: { d: number } }'; \n"
-                    "this is because accessing `c.d` results in `string` in the former type and `number` in the latter "
-                    "type, and `string` is not exactly `number`";
+        expected = "Type\n\t"
+                   "'{ a: number, b: string, c: { d: string } }'\n"
+                   "could not be converted into\n\t"
+                   "'{ a: number, b: string, c: { d: number } }'; \n"
+                   "this is because accessing `c.d` results in `string` in the former type and `number` in the latter "
+                   "type, and `string` is not exactly `number`";
     else
-        expected =  "Type\n\t"
-                    "'{| a: number, b: string, c: {| d: string |} |}'\n"
-                    "could not be converted into\n\t"
-                    "'{| a: number, b: string, c: {| d: number |} |}'\n"
-                    "caused by:\n  "
-                    "Property 'c' is not compatible.\n"
-                    "Type\n\t"
-                    "'{| d: string |}'\n"
-                    "could not be converted into\n\t"
-                    "'{| d: number |}'\n"
-                    "caused by:\n  "
-                    "Property 'd' is not compatible.\n"
-                    "Type 'string' could not be converted into 'number' in an invariant context";
+        expected = "Type\n\t"
+                   "'{| a: number, b: string, c: {| d: string |} |}'\n"
+                   "could not be converted into\n\t"
+                   "'{| a: number, b: string, c: {| d: number |} |}'\n"
+                   "caused by:\n  "
+                   "Property 'c' is not compatible.\n"
+                   "Type\n\t"
+                   "'{| d: string |}'\n"
+                   "could not be converted into\n\t"
+                   "'{| d: number |}'\n"
+                   "caused by:\n  "
+                   "Property 'd' is not compatible.\n"
+                   "Type 'string' could not be converted into 'number' in an invariant context";
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     std::string actual = toString(result.errors[0]);

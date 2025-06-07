@@ -14,15 +14,9 @@ LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTINT(LuauNormalizeIntersectionLimit)
 LUAU_FASTINT(LuauNormalizeUnionLimit)
-LUAU_FASTFLAG(DebugLuauGreedyGeneralization)
-LUAU_FASTFLAG(LuauNonReentrantGeneralization3)
-LUAU_FASTFLAG(LuauRefineWaitForBlockedTypesInTarget)
-LUAU_FASTFLAG(LuauSimplifyOutOfLine)
-LUAU_FASTFLAG(LuauOptimizeFalsyAndTruthyIntersect)
+LUAU_FASTFLAG(LuauSimplifyOutOfLine2)
 LUAU_FASTFLAG(LuauClipVariadicAnysFromArgsToGenericFuncs2)
-LUAU_FASTFLAG(LuauSubtypeGenericsAndNegations)
-LUAU_FASTFLAG(LuauNoMoreInjectiveTypeFunctions)
-LUAU_FASTFLAG(LuauSubtypeGenericsAndNegations)
+LUAU_FASTFLAG(LuauNormalizationReorderFreeTypeIntersect)
 
 using namespace Luau;
 
@@ -1072,6 +1066,26 @@ TEST_CASE_FIXTURE(NormalizeFixture, "free_type_and_not_truthy")
     CHECK("'a & (false?)" == toString(result));
 }
 
+TEST_CASE_FIXTURE(NormalizeFixture, "free_type_intersection_ordering")
+{
+    ScopedFastFlag sff[] = {
+        {FFlag::LuauSolverV2, true}, // Affects stringification of free types.
+        {FFlag::LuauNormalizationReorderFreeTypeIntersect, true},
+    };
+
+    TypeId freeTy = arena.freshType(builtinTypes, &globalScope);
+    TypeId orderA = arena.addType(IntersectionType{{freeTy, builtinTypes->stringType}});
+    auto normA = normalizer.normalize(orderA);
+    REQUIRE(normA);
+    CHECK_EQ("'a & string", toString(normalizer.typeFromNormal(*normA)));
+
+    TypeId orderB = arena.addType(IntersectionType{{builtinTypes->stringType, freeTy}});
+    auto normB = normalizer.normalize(orderB);
+    REQUIRE(normB);
+    // Prior to LuauNormalizationReorderFreeTypeIntersect this became `never` :skull:
+    CHECK_EQ("'a & string", toString(normalizer.typeFromNormal(*normB)));
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "normalizer_should_be_able_to_detect_cyclic_tables_and_not_stack_overflow")
 {
     if (!FFlag::LuauSolverV2)
@@ -1177,57 +1191,6 @@ end
 )");
 }
 
-#if 0
-TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_limit_function_intersection_complexity")
-{
-    ScopedFastInt luauTypeInferRecursionLimit{FInt::LuauTypeInferRecursionLimit, 80};
-    ScopedFastInt luauNormalizeIntersectionLimit{FInt::LuauNormalizeIntersectionLimit, 50};
-    ScopedFastInt luauNormalizeUnionLimit{FInt::LuauNormalizeUnionLimit, 20};
-
-    ScopedFastFlag _[] = {
-        {FFlag::LuauClipVariadicAnysFromArgsToGenericFuncs2, true},
-        {FFlag::DebugLuauGreedyGeneralization, true},
-        {FFlag::LuauSubtypeGenericsAndNegations, true},
-        {FFlag::LuauNoMoreInjectiveTypeFunctions, true}
-    };
-
-    CheckResult result = check(R"(
-function _(_).readu32(l0)
-return ({[_(_(_))]=_,[_(if _ then _)]=_,n0=_,})[_],nil
-end
-_(_)[_(n32)] %= _(_(_))
-    )");
-
-    LUAU_REQUIRE_ERRORS(result);
-}
-
-TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_propagate_normalization_failures")
-{
-    ScopedFastInt luauNormalizeIntersectionLimit{FInt::LuauNormalizeIntersectionLimit, 50};
-    ScopedFastInt luauNormalizeUnionLimit{FInt::LuauNormalizeUnionLimit, 20};
-
-    ScopedFastFlag _[] = {
-        {FFlag::LuauSolverV2, true},
-        {FFlag::LuauOptimizeFalsyAndTruthyIntersect, true},
-        {FFlag::LuauClipVariadicAnysFromArgsToGenericFuncs2, true},
-        {FFlag::LuauSimplifyOutOfLine, true},
-        {FFlag::LuauNonReentrantGeneralization3, false},
-        {FFlag::DebugLuauGreedyGeneralization, true},
-        {FFlag::LuauNoMoreInjectiveTypeFunctions, true},
-        {FFlag::LuauSubtypeGenericsAndNegations, true},
-    };
-
-    CheckResult result = check(R"(
-function _(_,"").readu32(l0)
-return ({[_(_(_))]=_,[_(if _ then _,_())]=_,[""]=_,})[_],nil
-end
-_().readu32 %= _(_(_(_),_))
-    )");
-
-    LUAU_REQUIRE_ERRORS(result);
-}
-#endif
-
 TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_flatten_type_pack_cycle")
 {
     ScopedFastFlag sff[] = {{FFlag::LuauSolverV2, true}};
@@ -1252,13 +1215,8 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_union_type_pack_cycle")
 {
     ScopedFastFlag sff[] = {
         {FFlag::LuauSolverV2, true},
-        {FFlag::LuauRefineWaitForBlockedTypesInTarget, true},
-        {FFlag::LuauSimplifyOutOfLine, true},
-        {FFlag::LuauSubtypeGenericsAndNegations, true},
-        {FFlag::LuauNoMoreInjectiveTypeFunctions, true},
-        {FFlag::LuauOptimizeFalsyAndTruthyIntersect, true},
+        {FFlag::LuauSimplifyOutOfLine2, true},
         {FFlag::LuauClipVariadicAnysFromArgsToGenericFuncs2, true},
-        {FFlag::DebugLuauGreedyGeneralization, true}
     };
     ScopedFastInt sfi{FInt::LuauTypeInferRecursionLimit, 0};
 
@@ -1273,6 +1231,6 @@ _[_] ^= _(_(_))
         InternalCompilerError
     );
 }
-#endif 
+#endif
 
 TEST_SUITE_END();
