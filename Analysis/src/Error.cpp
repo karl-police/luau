@@ -18,8 +18,9 @@
 #include <unordered_set>
 
 LUAU_FASTINTVARIABLE(LuauIndentTypeMismatchMaxTypeLength, 10)
-LUAU_FASTFLAG(LuauEagerGeneralization3)
+LUAU_FASTFLAG(LuauEagerGeneralization4)
 
+LUAU_FASTFLAG(LuauRemoveTypeCallsForReadWriteProps)
 LUAU_FASTFLAGVARIABLE(LuauBetterCannotCallFunctionPrimitive)
 
 static std::string wrongNumberOfArgsString(
@@ -159,7 +160,7 @@ struct ErrorConverter
         }
 
         if (result.empty())
-            result = constructErrorMessage(givenTypeName, wantedTypeName, std::nullopt, std::nullopt);
+            result = constructErrorMessage(std::move(givenTypeName), std::move(wantedTypeName), std::nullopt, std::nullopt);
 
 
         if (tm.error)
@@ -418,7 +419,12 @@ struct ErrorConverter
 
         auto it = mtt->props.find("__call");
         if (it != mtt->props.end())
-            return it->second.type();
+        {
+            if (FFlag::LuauSolverV2 && FFlag::LuauRemoveTypeCallsForReadWriteProps)
+                return it->second.readTy;
+            else
+                return it->second.type_DEPRECATED();
+        }
         else
             return std::nullopt;
     }
@@ -663,7 +669,7 @@ struct ErrorConverter
         }
 
         // binary operators
-        const auto binaryOps = FFlag::LuauEagerGeneralization3 ? kBinaryOps : DEPRECATED_kBinaryOps;
+        const auto binaryOps = FFlag::LuauEagerGeneralization4 ? kBinaryOps : DEPRECATED_kBinaryOps;
         if (auto binaryString = binaryOps.find(tfit->function->name); binaryString != binaryOps.end())
         {
             std::string result = "Operator '" + std::string(binaryString->second) + "' could not be applied to operands of types ";
@@ -718,7 +724,7 @@ struct ErrorConverter
                        "'";
         }
 
-        if ((FFlag::LuauEagerGeneralization3 ? kUnreachableTypeFunctions : DEPRECATED_kUnreachableTypeFunctions).count(tfit->function->name))
+        if ((FFlag::LuauEagerGeneralization4 ? kUnreachableTypeFunctions : DEPRECATED_kUnreachableTypeFunctions).count(tfit->function->name))
         {
             return "Type function instance " + Luau::toString(e.ty) + " is uninhabited\n" +
                    "This is likely to be a bug, please report it at https://github.com/luau-lang/luau/issues";
@@ -906,14 +912,14 @@ TypeMismatch::TypeMismatch(TypeId wantedType, TypeId givenType)
 TypeMismatch::TypeMismatch(TypeId wantedType, TypeId givenType, std::string reason)
     : wantedType(wantedType)
     , givenType(givenType)
-    , reason(reason)
+    , reason(std::move(reason))
 {
 }
 
 TypeMismatch::TypeMismatch(TypeId wantedType, TypeId givenType, std::string reason, std::optional<TypeError> error)
     : wantedType(wantedType)
     , givenType(givenType)
-    , reason(reason)
+    , reason(std::move(reason))
     , error(error ? std::make_shared<TypeError>(std::move(*error)) : nullptr)
 {
 }
@@ -929,7 +935,7 @@ TypeMismatch::TypeMismatch(TypeId wantedType, TypeId givenType, std::string reas
     : wantedType(wantedType)
     , givenType(givenType)
     , context(context)
-    , reason(reason)
+    , reason(std::move(reason))
 {
 }
 
@@ -937,7 +943,7 @@ TypeMismatch::TypeMismatch(TypeId wantedType, TypeId givenType, std::string reas
     : wantedType(wantedType)
     , givenType(givenType)
     , context(context)
-    , reason(reason)
+    , reason(std::move(reason))
     , error(error ? std::make_shared<TypeError>(std::move(*error)) : nullptr)
 {
 }

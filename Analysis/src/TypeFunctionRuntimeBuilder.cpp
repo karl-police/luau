@@ -20,6 +20,8 @@
 // currently, controls serialization, deserialization, and `type.copy`
 LUAU_DYNAMIC_FASTINTVARIABLE(LuauTypeFunctionSerdeIterationLimit, 100'000);
 
+LUAU_FASTFLAGVARIABLE(LuauTypeFunctionSerializeFollowMetatable)
+
 namespace Luau
 {
 
@@ -218,7 +220,7 @@ private:
             if (!g->explicitName)
                 name = format("g%d", g->index);
 
-            target = typeFunctionRuntime->typeArena.allocate(TypeFunctionGenericType{g->explicitName, false, name});
+            target = typeFunctionRuntime->typeArena.allocate(TypeFunctionGenericType{g->explicitName, false, std::move(name)});
         }
         else
         {
@@ -251,7 +253,7 @@ private:
             if (!gPack->explicitName)
                 name = format("g%d", gPack->index);
 
-            target = typeFunctionRuntime->typePackArena.allocate(TypeFunctionGenericTypePack{gPack->explicitName, name});
+            target = typeFunctionRuntime->typePackArena.allocate(TypeFunctionGenericTypePack{gPack->explicitName, std::move(name)});
         }
         else
         {
@@ -388,7 +390,7 @@ private:
     void serializeChildren(const MetatableType* m1, TypeFunctionTableType* m2)
     {
         // Serialize main part of the metatable immediately
-        if (auto tableTy = get<TableType>(m1->table))
+        if (auto tableTy = get<TableType>(FFlag::LuauTypeFunctionSerializeFollowMetatable ? follow(m1->table) : m1->table))
             serializeChildren(tableTy, m2);
 
         m2->metatable = shallowSerialize(m1->metatable);
@@ -527,12 +529,12 @@ public:
 
         if (hasExceededIterationLimit() || state->errors.size() != 0)
         {
-            TypeId error = state->ctx->builtins->errorRecoveryType();
+            TypeId error = state->ctx->builtins->errorType;
             types[ty] = error;
             return error;
         }
 
-        return find(ty).value_or(state->ctx->builtins->errorRecoveryType());
+        return find(ty).value_or(state->ctx->builtins->errorType);
     }
 
     TypePackId deserialize(TypeFunctionTypePackId tp)
@@ -542,12 +544,12 @@ public:
 
         if (hasExceededIterationLimit() || state->errors.size() != 0)
         {
-            TypePackId error = state->ctx->builtins->errorRecoveryTypePack();
+            TypePackId error = state->ctx->builtins->errorTypePack;
             packs[tp] = error;
             return error;
         }
 
-        return find(tp).value_or(state->ctx->builtins->errorRecoveryTypePack());
+        return find(tp).value_or(state->ctx->builtins->errorTypePack);
     }
 
 private:

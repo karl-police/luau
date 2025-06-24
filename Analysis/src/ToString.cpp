@@ -22,6 +22,7 @@
 LUAU_FASTFLAGVARIABLE(LuauEnableDenseTableAlias)
 
 LUAU_FASTFLAG(LuauSolverV2)
+LUAU_FASTFLAG(LuauRemoveTypeCallsForReadWriteProps)
 
 /*
  * Enables increasing levels of verbosity for Luau type names when stringifying.
@@ -148,7 +149,7 @@ void findCyclicTypes(std::set<TypeId>& cycles, std::set<TypePackId>& cycleTPs, T
 
 static std::pair<bool, std::optional<Luau::Name>> canUseTypeNameInScope(ScopePtr scope, const std::string& name)
 {
-    for (ScopePtr curr = scope; curr; curr = curr->parent)
+    for (ScopePtr curr = std::move(scope); curr; curr = curr->parent)
     {
         for (const auto& [importName, nameTable] : curr->importedTypeBindings)
         {
@@ -409,7 +410,10 @@ struct TypeStringifier
         if (prop.isShared())
         {
             emitKey(name);
-            stringify(prop.type());
+            if (FFlag::LuauRemoveTypeCallsForReadWriteProps)
+                stringify(*prop.readTy);
+            else
+                stringify(prop.type_DEPRECATED());
             return;
         }
 
@@ -440,7 +444,7 @@ struct TypeStringifier
             return _newStringify(name, prop);
 
         emitKey(name);
-        stringify(prop.type());
+        stringify(prop.type_DEPRECATED());
     }
 
     void stringify(TypePackId tp);
@@ -2056,7 +2060,7 @@ std::string toString(const Constraint& constraint, ToStringOptions& opts)
             return tos(c.resultType) + " ~ hasIndexer " + tos(c.subjectType) + " " + tos(c.indexType);
         }
         else if constexpr (std::is_same_v<T, AssignPropConstraint>)
-            return "assignProp " + tos(c.lhsType) + " " + c.propName + " " + tos(c.rhsType);
+            return tos(c.propType) +  " ~ assignProp " + tos(c.lhsType) + " " + c.propName + " " + tos(c.rhsType);
         else if constexpr (std::is_same_v<T, AssignIndexConstraint>)
             return "assignIndex " + tos(c.lhsType) + " " + tos(c.indexType) + " " + tos(c.rhsType);
         else if constexpr (std::is_same_v<T, UnpackConstraint>)

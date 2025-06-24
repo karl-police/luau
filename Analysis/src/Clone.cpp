@@ -12,6 +12,8 @@ LUAU_FASTFLAG(LuauSolverV2)
 
 // For each `Luau::clone` call, we will clone only up to N amount of types _and_ packs, as controlled by this limit.
 LUAU_FASTINTVARIABLE(LuauTypeCloneIterationLimit, 100'000)
+LUAU_FASTFLAGVARIABLE(LuauSolverAgnosticClone)
+
 namespace Luau
 {
 
@@ -73,12 +75,12 @@ public:
 
         if (hasExceededIterationLimit())
         {
-            TypeId error = builtinTypes->errorRecoveryType();
+            TypeId error = builtinTypes->errorType;
             (*types)[ty] = error;
             return error;
         }
 
-        return find(ty).value_or(builtinTypes->errorRecoveryType());
+        return find(ty).value_or(builtinTypes->errorType);
     }
 
     TypePackId clone(TypePackId tp)
@@ -88,12 +90,12 @@ public:
 
         if (hasExceededIterationLimit())
         {
-            TypePackId error = builtinTypes->errorRecoveryTypePack();
+            TypePackId error = builtinTypes->errorTypePack;
             (*packs)[tp] = error;
             return error;
         }
 
-        return find(tp).value_or(builtinTypes->errorRecoveryTypePack());
+        return find(tp).value_or(builtinTypes->errorTypePack);
     }
 
 private:
@@ -208,7 +210,7 @@ public:
 private:
     Property shallowClone(const Property& p)
     {
-        if (FFlag::LuauSolverV2)
+        if (FFlag::LuauSolverV2 || FFlag::LuauSolverAgnosticClone)
         {
             std::optional<TypeId> cloneReadTy;
             if (auto ty = p.readTy)
@@ -230,7 +232,7 @@ private:
         else
         {
             return Property{
-                shallowClone(p.type()),
+                shallowClone(p.type_DEPRECATED()),
                 p.deprecated,
                 p.deprecatedSuggestion,
                 p.location,
@@ -549,9 +551,9 @@ public:
 
 } // namespace
 
-TypePackId shallowClone(TypePackId tp, TypeArena& dest, CloneState& cloneState, bool ignorePersistent)
+TypePackId shallowClone(TypePackId tp, TypeArena& dest, CloneState& cloneState, bool clonePersistentTypes)
 {
-    if (tp->persistent && !ignorePersistent)
+    if (tp->persistent && !clonePersistentTypes)
         return tp;
 
     TypeCloner cloner{
@@ -560,15 +562,15 @@ TypePackId shallowClone(TypePackId tp, TypeArena& dest, CloneState& cloneState, 
         NotNull{&cloneState.seenTypes},
         NotNull{&cloneState.seenTypePacks},
         nullptr,
-        ignorePersistent ? tp : nullptr
+        clonePersistentTypes ? tp : nullptr
     };
 
     return cloner.shallowClone(tp);
 }
 
-TypeId shallowClone(TypeId typeId, TypeArena& dest, CloneState& cloneState, bool ignorePersistent)
+TypeId shallowClone(TypeId typeId, TypeArena& dest, CloneState& cloneState, bool clonePersistentTypes)
 {
-    if (typeId->persistent && !ignorePersistent)
+    if (typeId->persistent && !clonePersistentTypes)
         return typeId;
 
     TypeCloner cloner{
@@ -576,7 +578,7 @@ TypeId shallowClone(TypeId typeId, TypeArena& dest, CloneState& cloneState, bool
         cloneState.builtinTypes,
         NotNull{&cloneState.seenTypes},
         NotNull{&cloneState.seenTypePacks},
-        ignorePersistent ? typeId : nullptr,
+        clonePersistentTypes ? typeId : nullptr,
         nullptr
     };
 

@@ -20,7 +20,8 @@ LUAU_FASTFLAGVARIABLE(DebugLuauSubtypingCheckPathValidity)
 LUAU_FASTINTVARIABLE(LuauSubtypingReasoningLimit, 100)
 LUAU_FASTFLAG(LuauClipVariadicAnysFromArgsToGenericFuncs2)
 LUAU_FASTFLAGVARIABLE(LuauSubtypingCheckFunctionGenericCounts)
-LUAU_FASTFLAG(LuauEagerGeneralization3)
+LUAU_FASTFLAG(LuauEagerGeneralization4)
+LUAU_FASTFLAG(LuauRemoveTypeCallsForReadWriteProps)
 
 namespace Luau
 {
@@ -165,13 +166,13 @@ SubtypingResult& SubtypingResult::orElse(const SubtypingResult& other)
 
 SubtypingResult& SubtypingResult::withBothComponent(TypePath::Component component)
 {
-    return withSubComponent(component).withSuperComponent(component);
+    return withSubComponent(component).withSuperComponent(std::move(component));
 }
 
 SubtypingResult& SubtypingResult::withSubComponent(TypePath::Component component)
 {
     if (reasoning.empty())
-        reasoning.insert(SubtypingReasoning{Path(component), TypePath::kEmpty});
+        reasoning.insert(SubtypingReasoning{Path(std::move(component)), TypePath::kEmpty});
     else
     {
         for (auto& r : reasoning)
@@ -184,7 +185,7 @@ SubtypingResult& SubtypingResult::withSubComponent(TypePath::Component component
 SubtypingResult& SubtypingResult::withSuperComponent(TypePath::Component component)
 {
     if (reasoning.empty())
-        reasoning.insert(SubtypingReasoning{TypePath::kEmpty, Path(component)});
+        reasoning.insert(SubtypingReasoning{TypePath::kEmpty, Path(std::move(component))});
     else
     {
         for (auto& r : reasoning)
@@ -196,13 +197,13 @@ SubtypingResult& SubtypingResult::withSuperComponent(TypePath::Component compone
 
 SubtypingResult& SubtypingResult::withBothPath(TypePath::Path path)
 {
-    return withSubPath(path).withSuperPath(path);
+    return withSubPath(path).withSuperPath(std::move(path));
 }
 
 SubtypingResult& SubtypingResult::withSubPath(TypePath::Path path)
 {
     if (reasoning.empty())
-        reasoning.insert(SubtypingReasoning{path, TypePath::kEmpty});
+        reasoning.insert(SubtypingReasoning{std::move(path), TypePath::kEmpty});
     else
     {
         for (auto& r : reasoning)
@@ -215,7 +216,7 @@ SubtypingResult& SubtypingResult::withSubPath(TypePath::Path path)
 SubtypingResult& SubtypingResult::withSuperPath(TypePath::Path path)
 {
     if (reasoning.empty())
-        reasoning.insert(SubtypingReasoning{TypePath::kEmpty, path});
+        reasoning.insert(SubtypingReasoning{TypePath::kEmpty, std::move(path)});
     else
     {
         for (auto& r : reasoning)
@@ -680,14 +681,14 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId sub
         result.isSubtype = ok;
         result.isCacheable = false;
     }
-    else if (auto pair = get2<FreeType, FreeType>(subTy, superTy); FFlag::LuauEagerGeneralization3 && pair)
+    else if (auto pair = get2<FreeType, FreeType>(subTy, superTy); FFlag::LuauEagerGeneralization4 && pair)
     {
         // Any two free types are potentially subtypes of one another because
         // both of them could be narrowed to never.
         result = {true};
         result.assumedConstraints.emplace_back(SubtypeConstraint{subTy, superTy});
     }
-    else if (auto superFree = get<FreeType>(superTy); superFree && FFlag::LuauEagerGeneralization3)
+    else if (auto superFree = get<FreeType>(superTy); superFree && FFlag::LuauEagerGeneralization4)
     {
         // Given SubTy <: (LB <: SuperTy <: UB)
         //
@@ -702,7 +703,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId sub
         if (result.isSubtype)
             result.assumedConstraints.emplace_back(SubtypeConstraint{subTy, superTy});
     }
-    else if (auto subFree = get<FreeType>(subTy); subFree && FFlag::LuauEagerGeneralization3)
+    else if (auto subFree = get<FreeType>(subTy); subFree && FFlag::LuauEagerGeneralization4)
     {
         // Given (LB <: SubTy <: UB) <: SuperTy
         //
@@ -792,7 +793,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypeId sub
 
     assertReasoningValid(subTy, superTy, result, builtinTypes);
 
-    return cache(env, result, subTy, superTy);
+    return cache(env, std::move(result), subTy, superTy);
 }
 
 SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, TypePackId subTp, TypePackId superTp, NotNull<Scope> scope)
@@ -1437,7 +1438,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, const Tabl
 {
     SubtypingResult result{true};
 
-    if (FFlag::LuauEagerGeneralization3)
+    if (FFlag::LuauEagerGeneralization4)
     {
         if (subTable->props.empty() && !subTable->indexer && subTable->state == TableState::Sealed && superTable->indexer)
         {
@@ -1466,9 +1467,20 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, const Tabl
             if (isCovariantWith(env, builtinTypes->stringType, subTable->indexer->indexType, scope).isSubtype)
             {
                 if (superProp.isShared())
-                    results.push_back(isInvariantWith(env, subTable->indexer->indexResultType, superProp.type(), scope)
-                                          .withSubComponent(TypePath::TypeField::IndexResult)
-                                          .withSuperComponent(TypePath::Property::read(name)));
+                {
+                    if (FFlag::LuauRemoveTypeCallsForReadWriteProps)
+                    {
+                        results.push_back(isInvariantWith(env, subTable->indexer->indexResultType, *superProp.readTy, scope)
+                                              .withSubComponent(TypePath::TypeField::IndexResult)
+                                              .withSuperComponent(TypePath::Property::read(name)));
+                    }
+                    else
+                    {
+                        results.push_back(isInvariantWith(env, subTable->indexer->indexResultType, superProp.type_DEPRECATED(), scope)
+                                              .withSubComponent(TypePath::TypeField::IndexResult)
+                                              .withSuperComponent(TypePath::Property::read(name)));
+                    }
+                }
                 else
                 {
                     if (superProp.readTy)
@@ -1493,7 +1505,7 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, const Tabl
     {
         if (subTable->indexer)
             result.andAlso(isInvariantWith(env, *subTable->indexer, *superTable->indexer, scope));
-        else if (FFlag::LuauEagerGeneralization3 && subTable->state != TableState::Sealed)
+        else if (FFlag::LuauEagerGeneralization4 && subTable->state != TableState::Sealed)
         {
             // As above, we assume that {| |} <: {T} because the unsealed table
             // on the left will eventually gain the necessary indexer.
@@ -1643,10 +1655,22 @@ SubtypingResult Subtyping::isCovariantWith(SubtypingEnvironment& env, const Prim
             {
                 if (auto it = mttv->props.find("__index"); it != mttv->props.end())
                 {
-                    if (auto stringTable = get<TableType>(it->second.type()))
-                        result.orElse(
-                            isCovariantWith(env, stringTable, superTable, scope).withSubPath(TypePath::PathBuilder().mt().readProp("__index").build())
-                        );
+
+                    if (FFlag::LuauRemoveTypeCallsForReadWriteProps)
+                    {
+                        // the `string` metatable should not have any write-only types.
+                        LUAU_ASSERT(*it->second.readTy);
+
+                        if (auto stringTable = get<TableType>(*it->second.readTy))
+                            result.orElse(isCovariantWith(env, stringTable, superTable, scope)
+                                              .withSubPath(TypePath::PathBuilder().mt().readProp("__index").build()));
+                    }
+                    else
+                    {
+                        if (auto stringTable = get<TableType>(it->second.type_DEPRECATED()))
+                            result.orElse(isCovariantWith(env, stringTable, superTable, scope)
+                                              .withSubPath(TypePath::PathBuilder().mt().readProp("__index").build()));
+                    }
                 }
             }
         }
@@ -1676,10 +1700,21 @@ SubtypingResult Subtyping::isCovariantWith(
             {
                 if (auto it = mttv->props.find("__index"); it != mttv->props.end())
                 {
-                    if (auto stringTable = get<TableType>(it->second.type()))
-                        result.orElse(
-                            isCovariantWith(env, stringTable, superTable, scope).withSubPath(TypePath::PathBuilder().mt().readProp("__index").build())
-                        );
+                    if (FFlag::LuauRemoveTypeCallsForReadWriteProps)
+                    {
+                        // the `string` metatable should not have any write-only types.
+                        LUAU_ASSERT(*it->second.readTy);
+
+                        if (auto stringTable = get<TableType>(*it->second.readTy))
+                            result.orElse(isCovariantWith(env, stringTable, superTable, scope)
+                                              .withSubPath(TypePath::PathBuilder().mt().readProp("__index").build()));
+                    }
+                    else
+                    {
+                        if (auto stringTable = get<TableType>(it->second.type_DEPRECATED()))
+                            result.orElse(isCovariantWith(env, stringTable, superTable, scope)
+                                              .withSubPath(TypePath::PathBuilder().mt().readProp("__index").build()));
+                    }
                 }
             }
         }
@@ -1712,7 +1747,12 @@ SubtypingResult Subtyping::isCovariantWith(
     SubtypingResult res{true};
 
     if (superProp.isShared() && subProp.isShared())
-        res.andAlso(isInvariantWith(env, subProp.type(), superProp.type(), scope).withBothComponent(TypePath::Property::read(name)));
+    {
+        if (FFlag::LuauRemoveTypeCallsForReadWriteProps)
+            res.andAlso(isInvariantWith(env, *subProp.readTy, *superProp.readTy, scope).withBothComponent(TypePath::Property::read(name)));
+        else
+            res.andAlso(isInvariantWith(env, subProp.type_DEPRECATED(), superProp.type_DEPRECATED(), scope).withBothComponent(TypePath::Property::read(name)));
+    }
     else
     {
         if (superProp.readTy.has_value() && subProp.readTy.has_value())

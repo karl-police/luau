@@ -23,7 +23,6 @@
 LUAU_FASTFLAG(DebugLuauMagicTypes)
 
 LUAU_FASTFLAGVARIABLE(LuauNewNonStrictVisitTypes2)
-LUAU_FASTFLAG(LuauStoreReturnTypesAsPackOnAst)
 LUAU_FASTFLAGVARIABLE(LuauNewNonStrictFixGenericTypePacks)
 
 namespace Luau
@@ -226,7 +225,7 @@ struct NonStrictTypeChecker
             return result;
         }
         else if (get<ErrorTypePack>(pack))
-            return builtinTypes->errorRecoveryType();
+            return builtinTypes->errorType;
         else if (finite(pack) && size(pack) == 0)
             return builtinTypes->nilType; // `(f())` where `f()` returns no values is coerced into `nil`
         else
@@ -682,7 +681,7 @@ struct NonStrictTypeChecker
             if (arguments.size() > argTypes.size())
             {
                 // We are passing more arguments than we expect, so we should error
-                reportError(CheckedFunctionIncorrectArgs{functionName, argTypes.size(), arguments.size()}, call->location);
+                reportError(CheckedFunctionIncorrectArgs{std::move(functionName), argTypes.size(), arguments.size()}, call->location);
                 return fresh;
             }
 
@@ -729,7 +728,7 @@ struct NonStrictTypeChecker
 
                 if (!remainingArgsOptional)
                 {
-                    reportError(CheckedFunctionIncorrectArgs{functionName, argTypes.size(), arguments.size()}, call->location);
+                    reportError(CheckedFunctionIncorrectArgs{std::move(functionName), argTypes.size(), arguments.size()}, call->location);
                     return fresh;
                 }
             }
@@ -773,13 +772,7 @@ struct NonStrictTypeChecker
         {
             visitGenerics(exprFn->generics, exprFn->genericPacks);
 
-            if (FFlag::LuauStoreReturnTypesAsPackOnAst)
-                visit(exprFn->returnAnnotation);
-            else
-            {
-                if (exprFn->returnAnnotation_DEPRECATED)
-                    visit(*exprFn->returnAnnotation_DEPRECATED);
-            }
+            visit(exprFn->returnAnnotation);
 
             if (exprFn->varargAnnotation)
                 visit(exprFn->varargAnnotation);
@@ -1009,7 +1002,7 @@ struct NonStrictTypeChecker
                 }
                 symbol += ty->name.value;
 
-                reportError(UnknownSymbol{symbol, UnknownSymbol::Context::Type}, ty->location);
+                reportError(UnknownSymbol{std::move(symbol), UnknownSymbol::Context::Type}, ty->location);
             }
         }
     }
