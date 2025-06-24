@@ -265,7 +265,7 @@ return module
     local test = require(tbl.entry.A)
     )";
 
-    CheckResult check1 = frontend.check("Module/B");
+    CheckResult check1 = getFrontend().check("Module/B");
     
     auto typeTest = requireType("Module/B", "test");
 
