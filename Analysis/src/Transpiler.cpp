@@ -1258,6 +1258,26 @@ struct Printer
 
             writer.symbol(")");
         }
+
+        // CUSTOM-FIX
+        else if (const auto& a = program.as<AstStatDeclareFunction>())
+        {
+            writer.string("NOT IMPLEMENTED");
+        }
+        else if (const auto& a = program.as<AstStatDeclareGlobal>())
+        {
+            writer.keyword("declare");
+            writer.advance(a->nameLocation.begin);
+            writer.identifier(a->name.value);
+
+            writer.symbol(":");
+            visualizeTypeAnnotation(*a->type);
+        }
+        else if (const auto& a = program.as<AstStatDeclareExternType>())
+        {
+            writer.string("NOT IMPLEMENTED");
+        }
+
         else
         {
             LUAU_ASSERT(!"Unknown AstStat");
