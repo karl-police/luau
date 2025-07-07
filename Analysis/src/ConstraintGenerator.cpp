@@ -58,6 +58,8 @@ LUAU_FASTFLAG(LuauRemoveTypeCallsForReadWriteProps)
 LUAU_FASTFLAGVARIABLE(LuauFollowTypeAlias)
 LUAU_FASTFLAGVARIABLE(LuauFollowExistingTypeFunction)
 LUAU_FASTFLAGVARIABLE(LuauRefineTablesWithReadType)
+LUAU_FASTFLAGVARIABLE(LuauFragmentAutocompleteTracksRValueRefinements)
+LUAU_FASTFLAGVARIABLE(LuauPushFunctionTypesInFunctionStatement)
 
 namespace Luau
 {
@@ -821,8 +823,10 @@ void ConstraintGenerator::applyRefinements(const ScopePtr& scope, Location locat
 
             if (partition.shouldAppendNilType)
                 ty = createTypeFunctionInstance(builtinTypeFunctions().weakoptionalFunc, {ty}, {}, scope, location);
-
-            scope->rvalueRefinements[def] = ty;
+            if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+                updateRValueRefinements(scope, def, ty);
+            else
+                scope->rvalueRefinements[def] = ty;
         }
     }
 
@@ -1462,7 +1466,10 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFor* for_)
 
     DefId def = dfg->getDef(for_->var);
     forScope->lvalueTypes[def] = annotationTy;
-    forScope->rvalueRefinements[def] = annotationTy;
+    if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+        updateRValueRefinements(forScope, def, annotationTy);
+    else
+        forScope->rvalueRefinements[def] = annotationTy;
 
     visit(forScope, for_->body);
 
@@ -1614,9 +1621,15 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatLocalFuncti
 
     DefId def = dfg->getDef(function->name);
     scope->lvalueTypes[def] = functionType;
-    scope->rvalueRefinements[def] = functionType;
+    if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+        updateRValueRefinements(scope, def, functionType);
+    else
+        scope->rvalueRefinements[def] = functionType;
     sig.bodyScope->lvalueTypes[def] = sig.signature;
-    sig.bodyScope->rvalueRefinements[def] = sig.signature;
+    if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+        updateRValueRefinements(sig.bodyScope, def, sig.signature);
+    else
+        sig.bodyScope->rvalueRefinements[def] = sig.signature;
 
     Checkpoint start = checkpoint(this);
     checkFunctionBody(sig.bodyScope, function->func);
@@ -1676,20 +1689,77 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFunction* f
     {
         sig.bodyScope->bindings[localName->local] = Binding{sig.signature, localName->location};
         sig.bodyScope->lvalueTypes[def] = sig.signature;
-        sig.bodyScope->rvalueRefinements[def] = sig.signature;
+        if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+            updateRValueRefinements(sig.bodyScope, def, sig.signature);
+        else
+            sig.bodyScope->rvalueRefinements[def] = sig.signature;
     }
     else if (AstExprGlobal* globalName = function->name->as<AstExprGlobal>())
     {
         sig.bodyScope->bindings[globalName->name] = Binding{sig.signature, globalName->location};
         sig.bodyScope->lvalueTypes[def] = sig.signature;
-        sig.bodyScope->rvalueRefinements[def] = sig.signature;
+        if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+            updateRValueRefinements(sig.bodyScope, def, sig.signature);
+        else
+            sig.bodyScope->rvalueRefinements[def] = sig.signature;
     }
     else if (AstExprIndexName* indexName = function->name->as<AstExprIndexName>())
     {
-        sig.bodyScope->rvalueRefinements[def] = sig.signature;
+        if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+            updateRValueRefinements(sig.bodyScope, def, sig.signature);
+        else
+            sig.bodyScope->rvalueRefinements[def] = sig.signature;
     }
 
-    checkFunctionBody(sig.bodyScope, function->func);
+    if (FFlag::LuauPushFunctionTypesInFunctionStatement)
+    {
+        if (auto indexName = function->name->as<AstExprIndexName>())
+        {
+            auto beginProp = checkpoint(this);
+            auto [fn, _] = check(scope, indexName);
+            auto endProp = checkpoint(this);
+            auto pftc = addConstraint(
+                sig.signatureScope,
+                function->func->location,
+                PushFunctionTypeConstraint{
+                    fn,
+                    sig.signature,
+                    NotNull{function->func},
+                    /* isSelf */ indexName->op == ':',
+                }
+            );
+            forEachConstraint(
+                beginProp,
+                endProp,
+                this,
+                [pftc](const ConstraintPtr& c)
+                {
+                    pftc->dependencies.emplace_back(c.get());
+                }
+            );
+            auto beginBody = checkpoint(this);
+            checkFunctionBody(sig.bodyScope, function->func);
+            auto endBody = checkpoint(this);
+            forEachConstraint(
+                beginBody,
+                endBody,
+                this,
+                [pftc](const ConstraintPtr& c)
+                {
+                    c->dependencies.push_back(pftc);
+                }
+            );
+        }
+        else
+        {
+            checkFunctionBody(sig.bodyScope, function->func);
+        }
+    }
+    else
+    {
+        checkFunctionBody(sig.bodyScope, function->func);
+    }
+
     Checkpoint end = checkpoint(this);
 
     TypeId generalizedType = arena->addType(BlockedType{});
@@ -1761,7 +1831,10 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFunction* f
     if (generalizedType == nullptr)
         ice->ice("generalizedType == nullptr", function->location);
 
-    scope->rvalueRefinements[def] = generalizedType;
+    if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+        updateRValueRefinements(scope, def, generalizedType);
+    else
+        scope->rvalueRefinements[def] = generalizedType;
 
     return ControlFlow::None;
 }
@@ -2069,7 +2142,10 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatDeclareGlob
 
     DefId def = dfg->getDef(global);
     rootScope->lvalueTypes[def] = globalTy;
-    rootScope->rvalueRefinements[def] = globalTy;
+    if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+        updateRValueRefinements(rootScope, def, globalTy);
+    else
+        rootScope->rvalueRefinements[def] = globalTy;
 
     return ControlFlow::None;
 }
@@ -2328,7 +2404,10 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatDeclareFunc
 
     DefId def = dfg->getDef(global);
     rootScope->lvalueTypes[def] = fnType;
-    rootScope->rvalueRefinements[def] = fnType;
+    if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+        updateRValueRefinements(rootScope, def, fnType);
+    else
+        rootScope->rvalueRefinements[def] = fnType;
 
     return ControlFlow::None;
 }
@@ -2576,7 +2655,10 @@ InferencePack ConstraintGenerator::checkPack(const ScopePtr& scope, AstExprCall*
 
             DefId def = dfg->getDef(targetLocal);
             scope->lvalueTypes[def] = resultTy;       // TODO: typestates: track this as an assignment
-            scope->rvalueRefinements[def] = resultTy; // TODO: typestates: track this as an assignment
+            if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+                updateRValueRefinements(scope, def, resultTy); // TODO: typestates: track this as an assignment
+            else
+                scope->rvalueRefinements[def] = resultTy; // TODO: typestates: track this as an assignment
 
             // HACK: If we have a targetLocal, it has already been added to the
             // inferredBindings table.  We want to replace it so that we don't
@@ -2598,7 +2680,10 @@ InferencePack ConstraintGenerator::checkPack(const ScopePtr& scope, AstExprCall*
         if (auto def = dfg->getDefOptional(targetExpr))
         {
             scope->lvalueTypes[*def] = resultTy;
-            scope->rvalueRefinements[*def] = resultTy;
+            if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+                updateRValueRefinements(scope, *def, resultTy);
+            else
+                scope->rvalueRefinements[*def] = resultTy;
         }
     }
 
@@ -2908,7 +2993,10 @@ Inference ConstraintGenerator::checkIndexName(
         if (auto ty = lookup(scope, indexLocation, key->def))
             return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};
 
-        scope->rvalueRefinements[key->def] = result;
+        if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+            updateRValueRefinements(scope, key->def, result);
+        else
+            scope->rvalueRefinements[key->def] = result;
     }
 
     if (key)
@@ -2942,8 +3030,10 @@ Inference ConstraintGenerator::check(const ScopePtr& scope, AstExprIndexExpr* in
     {
         if (auto ty = lookup(scope, indexExpr->location, key->def))
             return Inference{*ty, refinementArena.proposition(key, builtinTypes->truthyType)};
-
-        scope->rvalueRefinements[key->def] = result;
+        if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+            updateRValueRefinements(scope, key->def, result);
+        else
+            scope->rvalueRefinements[key->def] = result;
     }
 
     auto c = addConstraint(scope, indexExpr->expr->location, HasIndexerConstraint{result, obj, indexType});
@@ -3712,7 +3802,10 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
 
         DefId def = dfg->getDef(fn->self);
         signatureScope->lvalueTypes[def] = selfType;
-        signatureScope->rvalueRefinements[def] = selfType;
+        if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+            updateRValueRefinements(signatureScope, def, selfType);
+        else
+            signatureScope->rvalueRefinements[def] = selfType;
     }
 
     for (size_t i = 0; i < fn->args.size; ++i)
@@ -3737,7 +3830,10 @@ ConstraintGenerator::FunctionSignature ConstraintGenerator::checkFunctionSignatu
 
         DefId def = dfg->getDef(local);
         signatureScope->lvalueTypes[def] = argTy;
-        signatureScope->rvalueRefinements[def] = argTy;
+        if (FFlag::LuauFragmentAutocompleteTracksRValueRefinements)
+            updateRValueRefinements(signatureScope, def, argTy);
+        else
+            signatureScope->rvalueRefinements[def] = argTy;
     }
 
     TypePackId varargPack = nullptr;
@@ -4689,5 +4785,18 @@ TypeId ConstraintGenerator::simplifyUnion(const ScopePtr& scope, Location locati
 {
     return ::Luau::simplifyUnion(builtinTypes, arena, left, right).result;
 }
+
+void ConstraintGenerator::updateRValueRefinements(const ScopePtr& scope, DefId def, TypeId ty) const
+{
+    updateRValueRefinements(scope.get(), def, ty);
+}
+
+void ConstraintGenerator::updateRValueRefinements(Scope* scope, DefId def, TypeId ty) const
+{
+    scope->rvalueRefinements[def] = ty;
+    if (auto sym = dfg->getSymbolFromDef(def))
+        scope->refinements[*sym] = ty;
+}
+
 
 } // namespace Luau
