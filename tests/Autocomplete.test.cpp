@@ -203,6 +203,34 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "idk_test_typefunc")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true}
+    };
+
+    loadDefinition(R"(
+        declare class CustomClass
+            function testFunc(self): number
+        end
+    )");
+
+    CheckResult result = check(R"(
+        type function tyFunc(arg)
+            print(arg:is("class"))
+            return arg
+        end
+        
+        type a = tyFunc<CustomClass>
+    )");
+
+    auto test = requireTypeAlias("a");
+
+    //LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idkTest33")
 {
     ScopedFastFlag sff[]{
