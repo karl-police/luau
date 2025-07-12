@@ -3,6 +3,7 @@
 
 #include "Luau/Ast.h"
 #include "Luau/BuiltinDefinitions.h"
+#include "Luau/BuiltinTypeFunctions.h"
 #include "Luau/Common.h"
 #include "Luau/Constraint.h"
 #include "Luau/ControlFlow.h"
@@ -44,8 +45,6 @@ LUAU_FASTFLAG(LuauEagerGeneralization4)
 LUAU_FASTFLAG(LuauEagerGeneralization4)
 LUAU_FASTFLAG(LuauGlobalVariableModuleIsolation)
 LUAU_FASTFLAGVARIABLE(LuauEnableWriteOnlyProperties)
-LUAU_FASTFLAG(LuauAddCallConstraintForIterableFunctions)
-LUAU_FASTFLAG(LuauDoNotAddUpvalueTypesToLocalType)
 LUAU_FASTFLAGVARIABLE(LuauAvoidDoubleNegation)
 LUAU_FASTFLAGVARIABLE(LuauSimplifyOutOfLine2)
 LUAU_FASTFLAG(LuauTableLiteralSubtypeSpecificCheck2)
@@ -1509,22 +1508,19 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatForIn* forI
         loopScope, getLocation(forIn->values), IterableConstraint{iterator, variableTypes, forIn->values.data[0], &module->astForInNextTypes}
     );
 
-    if (FFlag::LuauAddCallConstraintForIterableFunctions)
-    {
-        // Add an intersection ReduceConstraint for the key variable to denote that it can't be nil
-        AstLocal* keyVar = *forIn->vars.begin();
-        const DefId keyDef = dfg->getDef(keyVar);
-        const TypeId loopVar = loopScope->lvalueTypes[keyDef];
+    // Add an intersection ReduceConstraint for the key variable to denote that it can't be nil
+    AstLocal* keyVar = *forIn->vars.begin();
+    const DefId keyDef = dfg->getDef(keyVar);
+    const TypeId loopVar = loopScope->lvalueTypes[keyDef];
 
-        const TypeId intersectionTy =
-            createTypeFunctionInstance(builtinTypeFunctions().intersectFunc, {loopVar, builtinTypes->notNilType}, {}, loopScope, keyVar->location);
+    const TypeId intersectionTy =
+        createTypeFunctionInstance(builtinTypeFunctions().intersectFunc, {loopVar, builtinTypes->notNilType}, {}, loopScope, keyVar->location);
 
-        loopScope->bindings[keyVar] = Binding{intersectionTy, keyVar->location};
-        loopScope->lvalueTypes[keyDef] = intersectionTy;
+    loopScope->bindings[keyVar] = Binding{intersectionTy, keyVar->location};
+    loopScope->lvalueTypes[keyDef] = intersectionTy;
 
-        auto c = addConstraint(loopScope, keyVar->location, ReduceConstraint{intersectionTy});
-        c->dependencies.push_back(iterable);
-    }
+    auto c = addConstraint(loopScope, keyVar->location, ReduceConstraint{intersectionTy});
+    c->dependencies.push_back(iterable);
 
     for (TypeId var : variableTypes)
     {
@@ -3481,7 +3477,7 @@ void ConstraintGenerator::visitLValue(const ScopePtr& scope, AstExprLocal* local
     if (ty)
     {
         TypeIds* localDomain = localTypes.find(*ty);
-        if (localDomain && !(FFlag::LuauDoNotAddUpvalueTypesToLocalType && local->upvalue))
+        if (localDomain && !local->upvalue)
             localDomain->insert(rhsType);
     }
     else
@@ -3512,10 +3508,6 @@ void ConstraintGenerator::visitLValue(const ScopePtr& scope, AstExprLocal* local
     if (annotatedTy)
         addConstraint(scope, local->location, SubtypeConstraint{rhsType, *annotatedTy});
 
-    // This is vestigial.
-    if (!FFlag::LuauDoNotAddUpvalueTypesToLocalType)
-        if (TypeIds* localDomain = localTypes.find(*ty))
-            localDomain->insert(rhsType);
 }
 
 void ConstraintGenerator::visitLValue(const ScopePtr& scope, AstExprGlobal* global, TypeId rhsType)
