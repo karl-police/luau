@@ -2716,6 +2716,99 @@ TypeFunctionReductionResult<TypeId> weakoptionalTypeFunc(
     return {targetTy, Reduction::MaybeOk, {}, {}};
 }
 
+
+
+
+std::string strToLowercase(std::string& str)
+{
+    std::string result = "";
+
+    for (char c : str)
+        result += tolower(c);
+
+    return result;
+};
+
+std::optional<TableState> resolveTableStateOption(std::string input) {
+    if (input == "unsealed") { return TableState::Unsealed; }
+    if (input == "sealed") { return TableState::Sealed; }
+    if (input == "generic") { return TableState::Generic; }
+    if (input == "free") { return TableState::Free; }
+
+    return std::nullopt;
+};
+
+TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
+    const std::vector<TypeId>& typeParams,
+    const std::vector<TypePackId>& packParams,
+    NotNull<TypeFunctionContext> ctx,
+    bool isRaw,
+    TypeId instance
+)
+{
+    /*if (typeParams.size() != 1 || !packParams.empty())
+    {
+        ctx->ice->ice("tabletype type function: encountered a type function instance without the required argument structure");
+        LUAU_ASSERT(false);
+    }*/
+
+    TypeId stateTypeTy = follow(typeParams.at(0));
+
+    std::optional<TableState> tblState = std::nullopt;
+
+    // Get Input Table State
+    if (auto ty = get<SingletonType>(stateTypeTy))
+    {
+        if (auto strSingleton = get<StringSingleton>(ty))
+        {
+            std::string stateInput = strSingleton->value;
+            stateInput = strToLowercase(stateInput);
+            
+            tblState = resolveTableStateOption(stateInput);
+
+            if (tblState == std::nullopt)
+            {
+                ctx->ice->ice("tabletype function: first argument is not a valid table state");
+                LUAU_ASSERT(false);
+
+                return {std::nullopt, Reduction::Erroneous, {}, {}};
+            }
+        }
+    }
+
+    //const TypeId stringType = ctx->builtins->stringType;
+
+    TableType newUnsealedTbl = TableType(tblState.value(), TypeLevel{}, ctx->scope.get());
+    newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
+
+
+    TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
+
+
+    //BlockedType testBlocked = BlockedType{};
+    //TypeId newTblTy = ctx->arena->addType(testBlocked);
+
+    return {std::move(newTblTy), Reduction::MaybeOk, {}, {}};
+    //return {newTblTy, Reduction::Irreducible, {}, {}};
+    /*return {ctx->arena->addType(
+        TableType({}, TableIndexer{stringType, stringType}, TypeLevel{}, TableState::Unsealed)
+    ), false, {}, {}};*/
+}
+
+// Testing
+TypeFunctionReductionResult<TypeId> tabletypeFunction(
+    TypeId instance,
+    const std::vector<TypeId>& typeParams,
+    const std::vector<TypePackId>& packParams,
+    NotNull<TypeFunctionContext> ctx
+)
+{
+    return tabletypeFunctionImpl(typeParams, packParams, ctx, /* isRaw */ false, instance);
+}
+
+
+
+
 BuiltinTypeFunctions::BuiltinTypeFunctions()
     : userFunc{"user", userDefinedTypeFunction}
     , notFunc{"not", notTypeFunction}
@@ -2745,6 +2838,9 @@ BuiltinTypeFunctions::BuiltinTypeFunctions()
     , setmetatableFunc{"setmetatable", setmetatableTypeFunction}
     , getmetatableFunc{"getmetatable", getmetatableTypeFunction}
     , weakoptionalFunc{"weakoptional", weakoptionalTypeFunc}
+
+
+    , tabletypeFunc{"tabletype", tabletypeFunction}
 {
 }
 

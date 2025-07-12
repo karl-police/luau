@@ -48,6 +48,10 @@ struct BuiltinTypeFunctions
 
     TypeFunction weakoptionalFunc;
 
+    // Testing
+    TypeFunction tabletypeFunc;
+
+
     void addToScope(NotNull<TypeArena> arena, NotNull<Scope> scope) const;
 };
 
