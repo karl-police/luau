@@ -401,11 +401,11 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        {FFlag::DebugLuauLogBindings, true},
-        {FFlag::DebugLuauLogSolverGenerator, true},
-        {FFlag::DebugLuauLogTypeFamilies, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogTypeFamilies, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
 
@@ -445,11 +445,11 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        {FFlag::DebugLuauLogSolver, true},
-        {FFlag::DebugLuauLogSolverMoreDetails, true},
-        {FFlag::DebugLuauLogBindings, true},
-        {FFlag::DebugLuauLogSolverGenerator, true},
-        {FFlag::DebugLuauLogTypeFamilies, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::DebugLuauLogBindings, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogTypeFamilies, true},
         {FFlag::LuauEagerGeneralization4, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
@@ -503,6 +503,7 @@ local tbl_ABC = nil :: typeof(tbl_A) & tbl_B & typeof(tbl_C)
 local indexesABC = nil :: keyof<typeof(tbl_ABC)>
 )");
 
+    auto test2 = requireType("test");
     auto test1 = requireType("indexesABC");
 
     /*if (auto ty = follow(test1)->ty.get_if<UnionType>())
