@@ -1252,7 +1252,6 @@ struct Printer
 
             writer.symbol(")");
         }
-
         // CUSTOM-FIX
         else if (const auto& a = program.as<AstStatDeclareFunction>())
         {
@@ -1271,7 +1270,6 @@ struct Printer
         {
             writer.string("NOT IMPLEMENTED");
         }
-
         else
         {
             LUAU_ASSERT(!"Unknown AstStat");
