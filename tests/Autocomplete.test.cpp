@@ -211,7 +211,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "idk_test_typefunc")
     };
 
     loadDefinition(R"(
-        declare class CustomClass
+        declare extern type CustomExternType with
             function testFunc(self): number
         end
     )");
@@ -222,7 +222,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "idk_test_typefunc")
             return arg
         end
         
-        type a = tyFunc<CustomClass>
+        type a = tyFunc<CustomExternType>
     )");
 
     auto test = requireTypeAlias("a");
