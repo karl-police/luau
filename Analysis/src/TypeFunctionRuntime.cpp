@@ -35,7 +35,7 @@ LuauTempThreadPopper::~LuauTempThreadPopper()
 {
     lua_pop(L, 1);
 }
-
+test
 static void dummyStateClose(lua_State*) {}
 
 TypeFunctionRuntime::TypeFunctionRuntime(NotNull<InternalErrorReporter> ice, NotNull<TypeCheckLimits> limits)
