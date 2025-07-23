@@ -38,6 +38,7 @@ LUAU_FASTFLAG(LuauEagerGeneralization4)
 LUAU_FASTFLAG(LuauExpectedTypeVisitor)
 LUAU_FASTFLAG(LuauImplicitTableIndexerKeys3)
 LUAU_FASTFLAG(LuauPushFunctionTypesInFunctionStatement)
+LUAU_FASTFLAG(LuauTableLiteralSubtypeSpecificCheck2)
 
 using namespace Luau;
 
@@ -207,7 +208,9 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
 TEST_CASE_FIXTURE(BuiltinsFixture, "idk_test_typefunc")
 {
     ScopedFastFlag sff[]{
-        {FFlag::LuauSolverV2, true}
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
     };
 
     loadDefinition(R"(
@@ -218,8 +221,11 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "idk_test_typefunc")
 
     CheckResult result = check(R"(
         type function tyFunc(arg)
-            print(arg:is("class"))
-            return arg
+            if (arg:is("class")) then
+                return arg
+            end
+
+            return types.boolean
         end
         
         type a = tyFunc<CustomExternType>
@@ -227,7 +233,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "idk_test_typefunc")
 
     auto test = requireTypeAlias("a");
 
-    //LUAU_REQUIRE_NO_ERRORS(result);
+    LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 
