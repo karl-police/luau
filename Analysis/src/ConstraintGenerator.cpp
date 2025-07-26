@@ -164,7 +164,10 @@ struct HasFreeType : TypeOnceVisitor
 {
     bool result = false;
 
-    HasFreeType() {}
+    HasFreeType()
+        : TypeOnceVisitor("TypeOnceVisitor")
+    {
+    }
 
     bool visit(TypeId ty) override
     {
@@ -684,6 +687,11 @@ namespace
 struct FindSimplificationBlockers : TypeOnceVisitor
 {
     bool found = false;
+
+    FindSimplificationBlockers()
+        : TypeOnceVisitor("FindSimplificationBlockers")
+    {
+    }
 
     bool visit(TypeId) override
     {
@@ -1205,7 +1213,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStat* stat)
         );
     }
 
-    RecursionLimiter limiter{&recursionCount, FInt::LuauCheckRecursionLimit};
+    RecursionLimiter limiter{"ConstraintGenerator", &recursionCount, FInt::LuauCheckRecursionLimit};
 
     if (auto s = stat->as<AstStatBlock>())
         return visit(scope, s);
