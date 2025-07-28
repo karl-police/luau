@@ -10,6 +10,8 @@
 
 #include "doctest.h"
 
+LUAU_FASTFLAG(LuauParseFixASTDeclareFunctionLocationStart);
+
 using namespace Luau;
 
 TEST_SUITE_BEGIN("TranspilerTests");
@@ -1583,6 +1585,50 @@ TEST_CASE_FIXTURE(Fixture, "transpile_declare_global_stat")
 
     CHECK_EQ(result, code);
 }
+
+TEST_CASE_FIXTURE(Fixture, "transpile_declare_function_stat")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::LuauParseFixASTDeclareFunctionLocationStart, true}
+    };
+
+    std::string code = R"(
+    @checked @deprecated declare function ABC<E, A..., R1..., R2...>(
+        f: (A...)-> R1..., err: (E)-> R2..., ...: number): (boolean, R1...)
+    )";
+
+    ParseOptions options;
+    options.allowDeclarationSyntax = true;
+
+    auto allocator = Allocator{};
+    auto names = AstNameTable{allocator};
+    ParseResult parseResult = Parser::parse(code.data(), code.size(), names, allocator, options);
+
+    auto result = transpileWithTypes(*parseResult.root);
+
+    CHECK_EQ(result, code);
+}
+
+/*TEST_CASE_FIXTURE(Fixture, "transpile_declare_extern_type_stat")
+{
+    std::string code = R"(declare extern type Foo with
+        prop: number
+        [""]: number
+        function method(self, foo: number): string
+end)";
+
+    ParseOptions options;
+    options.allowDeclarationSyntax = true;
+
+    auto allocator = Allocator{};
+    auto names = AstNameTable{allocator};
+    ParseResult parseResult = Parser::parse(code.data(), code.size(), names, allocator, options);
+
+    auto result = transpileWithTypes(*parseResult.root);
+
+    CHECK_EQ(result, code);
+}*/
 
 TEST_CASE_FIXTURE(Fixture, "transpile_to_string")
 {
