@@ -1363,8 +1363,7 @@ struct Printer
                     writer.advance(prop.nameLocation.begin);
                     writer.identifier(prop.name.value);
 
-                    writer.symbol("(");
-                    writer.keyword("self");
+                    // self is missing
                 }
                 else
                 {
