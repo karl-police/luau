@@ -47,7 +47,6 @@ LUAU_FASTFLAG(LuauGlobalVariableModuleIsolation)
 LUAU_FASTFLAGVARIABLE(LuauEnableWriteOnlyProperties)
 LUAU_FASTFLAGVARIABLE(LuauSimplifyOutOfLine2)
 LUAU_FASTFLAG(LuauTableLiteralSubtypeSpecificCheck2)
-LUAU_FASTFLAG(LuauDfgAllowUpdatesInLoops)
 LUAU_FASTFLAGVARIABLE(LuauDisablePrimitiveInferenceInLargeTables)
 LUAU_FASTINTVARIABLE(LuauPrimitiveInferenceInTableLimit, 500)
 LUAU_FASTFLAGVARIABLE(LuauSkipLvalueForCompoundAssignment)
@@ -57,6 +56,7 @@ LUAU_FASTFLAGVARIABLE(LuauFragmentAutocompleteTracksRValueRefinements)
 LUAU_FASTFLAGVARIABLE(LuauPushFunctionTypesInFunctionStatement)
 LUAU_FASTFLAGVARIABLE(LuauInferActualIfElseExprType)
 LUAU_FASTFLAGVARIABLE(LuauDoNotPrototypeTableIndex)
+LUAU_FASTFLAG(LuauLimitDynamicConstraintSolving)
 
 namespace Luau
 {
@@ -1471,8 +1471,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatFor* for_)
 
     visit(forScope, for_->body);
 
-    if (FFlag::LuauDfgAllowUpdatesInLoops)
-        scope->inheritAssignments(forScope);
+    scope->inheritAssignments(forScope);
 
     return ControlFlow::None;
 }
@@ -1532,8 +1531,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatForIn* forI
     visit(loopScope, forIn->body);
     Checkpoint end = checkpoint(this);
 
-    if (FFlag::LuauDfgAllowUpdatesInLoops)
-        scope->inheritAssignments(loopScope);
+    scope->inheritAssignments(loopScope);
 
     // This iter constraint must dispatch first.
     forEachConstraint(
@@ -1558,8 +1556,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatWhile* whil
 
     visit(whileScope, while_->body);
 
-    if (FFlag::LuauDfgAllowUpdatesInLoops)
-        scope->inheritAssignments(whileScope);
+    scope->inheritAssignments(whileScope);
 
     return ControlFlow::None;
 }
@@ -1572,8 +1569,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatRepeat* rep
 
     check(repeatScope, repeat->condition);
 
-    if (FFlag::LuauDfgAllowUpdatesInLoops)
-        scope->inheritAssignments(repeatScope);
+    scope->inheritAssignments(repeatScope);
 
     return ControlFlow::None;
 }
@@ -2175,6 +2171,14 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatDeclareExte
                 GenericError{format("Cannot use non-class type '%s' as a superclass of class '%s'", superName.c_str(), declaredExternType->name.value)
                 }
             );
+
+            if (FFlag::LuauLimitDynamicConstraintSolving)
+            {
+                // If we don't emplace an error type here, then later we'll be
+                // exposing a blocked type in this file's type interface. This
+                // is _normally_ harmless.
+                emplaceType<BoundType>(asMutable(bindingIt->second.type), builtinTypes->errorType);
+            }
 
             return ControlFlow::None;
         }
@@ -3949,6 +3953,10 @@ TypeId ConstraintGenerator::resolveReferenceType(
             }
             else
                 return resolveType_(scope, ref->parameters.data[0].type, inTypeArguments);
+        }
+        else if (FFlag::LuauLimitDynamicConstraintSolving && ref->name == "_luau_blocked_type")
+        {
+            return arena->addType(BlockedType{});
         }
     }
 
