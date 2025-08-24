@@ -22,6 +22,7 @@ LUAU_DYNAMIC_FASTFLAGVARIABLE(DebugLuauReportReturnTypeVariadicWithTypeSuffix, f
 LUAU_FASTFLAGVARIABLE(LuauParseFixASTDeclareFunctionLocationStart)
 LUAU_FASTFLAGVARIABLE(LuauParseIncompleteInterpStringsWithLocation)
 LUAU_FASTFLAGVARIABLE(LuauParametrizedAttributeSyntax)
+LUAU_FASTFLAGVARIABLE(DebugLuauStringSingletonBasedOnQuotes)
 
 // Clip with DebugLuauReportReturnTypeVariadicWithTypeSuffix
 bool luau_telemetry_parsed_return_type_variadic_with_type_suffix = false;
@@ -3858,17 +3859,39 @@ AstExpr* Parser::parseString()
     Location location = lexer.current().location;
 
     AstExprConstantString::QuoteStyle style;
-    switch (lexer.current().type)
+    if (FFlag::DebugLuauStringSingletonBasedOnQuotes)
     {
-    case Lexeme::QuotedString:
-    case Lexeme::InterpStringSimple:
-        style = AstExprConstantString::QuotedSimple;
-        break;
-    case Lexeme::RawString:
-        style = AstExprConstantString::QuotedRaw;
-        break;
-    default:
-        LUAU_ASSERT(false && "Invalid string type");
+        switch (lexer.current().type)
+        {
+        case Lexeme::InterpStringSimple:
+            style = AstExprConstantString::QuotedSimple;
+            break;
+        case Lexeme::RawString:
+            style = AstExprConstantString::QuotedRaw;
+            break;
+        case Lexeme::QuotedString:
+            style = lexer.current().getQuoteStyle() == Lexeme::QuoteStyle::Single
+                        ? AstExprConstantString::QuotedSingle
+                        : AstExprConstantString::QuotedSimple;
+            break;
+        default:
+            LUAU_ASSERT(false && "Invalid string type");
+        }
+    }
+    else
+    {
+        switch (lexer.current().type)
+        {
+        case Lexeme::QuotedString:
+        case Lexeme::InterpStringSimple:
+            style = AstExprConstantString::QuotedSimple;
+            break;
+        case Lexeme::RawString:
+            style = AstExprConstantString::QuotedRaw;
+            break;
+        default:
+            LUAU_ASSERT(false && "Invalid string type");
+        }
     }
 
     CstExprConstantString::QuoteStyle fullStyle;
