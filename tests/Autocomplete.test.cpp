@@ -203,6 +203,48 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
 }
 
 
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+    };
+
+    CheckResult result = check(R"(
+        function route<P>(path: P, callback: (P) -> any) end
+        route("test", function(path) end)
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test2")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+        //{FFlag::LuauEagerGeneralization4, true}
+    };
+
+    CheckResult result = check(R"(
+--!strict
+        function name<P>(arg1: P)
+            return function(what: P)
+
+            end
+        end
+
+        local whatIsThis2 = name(nil)
+        whatIsThis2(1)
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "idk_test_typefunc")
 {
     ScopedFastFlag sff[]{
