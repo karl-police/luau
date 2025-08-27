@@ -360,8 +360,13 @@ size_t HashInstantiationSignature::operator()(const InstantiationSignature& sign
 
 
 // CUSTOM-4
-/*struct TypeFinder : TypeOnceVisitor
+/*
+struct TypeFinder : TypeOnceVisitor
 {
+    TypeFinder() : TypeOnceVisitor("TypeFinder", false)
+    {
+    }
+
     TypeId tyToFind;
     bool hasFoundType = false;
 
@@ -600,7 +605,8 @@ struct ConstraintTypeFinder
         else if (auto c = get_if<UnpackConstraint>(&cV))
             return visit(*c);
     }
-};*/
+};
+*/
 
 struct InstantiationQueuer : TypeOnceVisitor
 {
