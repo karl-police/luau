@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <memory>
 
+LUAU_FASTFLAG(DebugLuauLogSolver); // CUSTOM-2
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverGenerator); // CUSTOM-2
 //LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverGenerator, false); // CUSTOM-2
 LUAU_FASTINT(LuauCheckRecursionLimit)
@@ -122,6 +123,15 @@ static std::optional<TypeGuard> matchTypeGuard(const AstExprBinary::Op op, AstEx
 
 
 // For Debugging
+// CUSTOM-2
+[[maybe_unused]] static bool LogIsPossibleBuiltIn(const ConstraintGenerator* p_generator)
+{
+    auto moduleName = p_generator->module->humanReadableName.c_str();
+    if (strcmp(moduleName, "@luau") == 0)
+        return true;
+    else
+        return false;
+}
 /*[[maybe_unused]] static void LogGeneratorAddConstraintV(const ScopePtr& scope, const ConstraintV& cV)
 {
     printf("Constraint Added:\n\t%s\n\n", toString(cV).c_str());
@@ -309,9 +319,16 @@ void ConstraintGenerator::visitModuleRoot(AstStatBlock* block)
     Checkpoint start = checkpoint(this);
 
     // CUSTOM-2
+    if (FFlag::DebugLuauLogSolver || FFlag::DebugLuauLogSolverGenerator)
+    {
+        // To set a breakpoint for debugging
+        if (!LogIsPossibleBuiltIn(this))
+            volatile int _ = 0;
+    }
+    // CUSTOM-2
     if (FFlag::DebugLuauLogSolverGenerator)
     {
-        printf("\nStarting ConstraintGenerator - visitModuleRoot\n");
+        printf( "\nStarting ConstraintGenerator - visitModuleRoot (%s)\n", module->humanReadableName.c_str() );
     }
 
     ControlFlow cf = visitBlockWithoutChildScope(scope, block);
