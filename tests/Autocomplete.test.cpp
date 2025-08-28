@@ -207,17 +207,33 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolverGenerator, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
     };
 
     CheckResult result = check(R"(
-        function route<P>(path: P, callback: (P) -> any) end
-        route("test", function(path) end)
+        --[[
+        function roa<P>(path: P)
+            return function(a: P) end
+        end
+        local lo2 = roa(2)]]--
+
+        --function rola<P>(path: P): P end
+        --rola("roley")
+
+        --function route<P>(path: P, callback: (P) -> any) -> P end
+        --local o = route("test", function(path2) path2.@1 end)
+
+        local function route(path: P, callback: (P) -> P)
+            local e = callback(path)
+        end
+        route(2)
     )");
 
-    LUAU_REQUIRE_NO_ERRORS(result);
+    //auto ac1 = autocomplete('1');
+
+    //LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test2")
