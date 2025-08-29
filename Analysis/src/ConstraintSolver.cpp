@@ -1238,7 +1238,7 @@ bool ConstraintSolver::tryDispatch(NotNull<const Constraint> constraint, bool fo
     else if (auto fcc = get<FunctionCheckConstraint>(*constraint))
         success = tryDispatch(*fcc, constraint, force);
     else if (auto fcc = get<PrimitiveTypeConstraint>(*constraint))
-        success = tryDispatch(*fcc, constraint, force);
+        success = tryDispatch(*fcc, constraint);
     else if (auto hpc = get<HasPropConstraint>(*constraint))
         success = tryDispatch(*hpc, constraint);
     else if (auto spc = get<HasIndexerConstraint>(*constraint))
