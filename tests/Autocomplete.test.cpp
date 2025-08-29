@@ -37,6 +37,8 @@ LUAU_FASTFLAG(LuauNonReentrantGeneralization3)
 LUAU_FASTFLAG(LuauEagerGeneralization4)
 LUAU_FASTFLAG(LuauImplicitTableIndexerKeys3)
 LUAU_FASTFLAG(LuauIncludeBreakContinueStatements)
+LUAU_FASTFLAG(LuauSolverAgnosticStringification)
+LUAU_FASTFLAG(LuauSuggestHotComments)
 
 using namespace Luau;
 
@@ -94,6 +96,7 @@ struct ACFixtureImpl : BaseType
 
     CheckResult check(const std::string& source)
     {
+        this->getFrontend();
         markerPosition.clear();
         std::string filteredSource;
         filteredSource.reserve(source.size());
@@ -172,11 +175,20 @@ struct ACFixture : ACFixtureImpl<Fixture>
     ACFixture()
         : ACFixtureImpl<Fixture>()
     {
+    }
+
+    Frontend& getFrontend() override
+    {
+        if (frontend)
+            return *frontend;
+
+        Frontend& f = Fixture::getFrontend();
         // TODO - move this into its own consructor
-        addGlobalBinding(getFrontend().globals, "table", Binding{getBuiltins()->anyType});
-        addGlobalBinding(getFrontend().globals, "math", Binding{getBuiltins()->anyType});
-        addGlobalBinding(getFrontend().globalsForAutocomplete, "table", Binding{getBuiltins()->anyType});
-        addGlobalBinding(getFrontend().globalsForAutocomplete, "math", Binding{getBuiltins()->anyType});
+        addGlobalBinding(f.globals, "table", Binding{getBuiltins()->anyType});
+        addGlobalBinding(f.globals, "math", Binding{getBuiltins()->anyType});
+        addGlobalBinding(f.globalsForAutocomplete, "table", Binding{getBuiltins()->anyType});
+        addGlobalBinding(f.globalsForAutocomplete, "math", Binding{getBuiltins()->anyType});
+        return *frontend;
     }
 };
 
@@ -1059,18 +1071,6 @@ TEST_CASE_FIXTURE(ACFixture, "dont_offer_any_suggestions_from_within_a_comment")
         --[[
             foo:@1
         ]]
-    )");
-
-    auto ac = autocomplete('1');
-
-    CHECK_EQ(0, ac.entryMap.size());
-    CHECK_EQ(ac.context, AutocompleteContext::Unknown);
-}
-
-TEST_CASE_FIXTURE(ACFixture, "dont_offer_any_suggestions_from_the_end_of_a_comment")
-{
-    check(R"(
-        --!strict@1
     )");
 
     auto ac = autocomplete('1');
@@ -2656,6 +2656,8 @@ local abc = bar(@1)
 
 TEST_CASE_FIXTURE(ACFixture, "type_correct_sealed_table")
 {
+    ScopedFastFlag sff{FFlag::LuauSolverAgnosticStringification, true};
+
     check(R"(
 local function f(a: { x: number, y: number }) return a.x + a.y end
 local fp: @1= f
@@ -2668,7 +2670,7 @@ local fp: @1= f
     else
     {
         // NOTE: All autocomplete tests occur under no-check mode.
-        REQUIRE_EQ("({| x: number, y: number |}) -> (...any)", toString(requireType("f")));
+        REQUIRE_EQ("({ x: number, y: number }) -> (...any)", toString(requireType("f")));
     }
     CHECK(ac.entryMap.count("({ x: number, y: number }) -> number"));
 }
@@ -2923,9 +2925,9 @@ local a: aaa.do
 
 TEST_CASE_FIXTURE(ACFixture, "comments")
 {
-    fileResolver.source["Comments"] = "--!str";
+    fileResolver.source["Comments"] = "--foo";
 
-    auto ac = autocomplete("Comments", Position{0, 6});
+    auto ac = autocomplete("Comments", Position{0, 5});
     CHECK_EQ(0, ac.entryMap.size());
 }
 
@@ -5346,6 +5348,23 @@ TEST_CASE_FIXTURE(ACFixture, "autocomplete_exclude_break_continue_in_incomplete_
     // We'd like to include break/continue here but the incomplete loop ends immediately.
     CHECK_EQ(ac.entryMap.count("break"), 0);
     CHECK_EQ(ac.entryMap.count("continue"), 0);
+}
+
+TEST_CASE_FIXTURE(ACFixture, "autocomplete_suggest_hot_comments")
+{
+    ScopedFastFlag sff{FFlag::LuauSuggestHotComments, true};
+
+    check("--!@1");
+
+    auto ac = autocomplete('1');
+
+    CHECK(!ac.entryMap.empty());
+    CHECK(ac.entryMap.count("strict"));
+    CHECK(ac.entryMap.count("nonstrict"));
+    CHECK(ac.entryMap.count("nocheck"));
+    CHECK(ac.entryMap.count("native"));
+    CHECK(ac.entryMap.count("nolint"));
+    CHECK(ac.entryMap.count("optimize"));
 }
 
 TEST_SUITE_END();
