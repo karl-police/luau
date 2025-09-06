@@ -2707,7 +2707,7 @@ TypeFunctionReductionResult<TypeId> tabletypeFunctionImpl(
     //const TypeId stringType = ctx->builtins->stringType;
 
     TableType newUnsealedTbl = TableType(tblState.value(), TypeLevel{}, ctx->scope.get());
-    newUnsealedTbl.definitionModuleName = ctx->solver->currentModuleName;
+    newUnsealedTbl.definitionModuleName = ctx->solver->module->name;
 
 
     TypeId newTblTy = ctx->arena->addType(newUnsealedTbl);
