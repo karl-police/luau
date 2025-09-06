@@ -233,6 +233,7 @@ if(LUAU_BUILD_CLI)
 
     target_link_libraries(Luau.Repl.CLI PRIVATE osthreads)
     target_link_libraries(Luau.Analyze.CLI PRIVATE osthreads)
+    target_link_libraries(Luau.Ast.CLI PRIVATE osthreads)
 
     target_link_libraries(Luau.Analyze.CLI PRIVATE Luau.Analysis Luau.CLI.lib Luau.RequireNavigator)
 
