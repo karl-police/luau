@@ -215,6 +215,37 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
 }
 
 
+
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+    };
+
+    CheckResult result = check(R"(
+        local test = {}
+        function test.a(a: number) end
+        function test:b() end
+        function test.c(a) end
+        test.@1
+        -- test.# - only 'a' and 'c'
+        -- test:# - only 'b' and 'c'
+
+        local test2 = {}
+        test2.a = function(a: number) end
+        test2.b = function(self) end
+        test2.c = function(a) end
+        test2.@2
+        -- test2.# - makes 'a,b,c' appear, ISSUE: 'b' shouldn't appear
+        -- test2:# - only 'b' and 'c'
+    )");
+
+    auto ac1 = autocomplete('1');
+    auto ac2 = autocomplete('2');
+
+    // LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
 {
     ScopedFastFlag sff[]{
