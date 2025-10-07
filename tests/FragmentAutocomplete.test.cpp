@@ -295,7 +295,109 @@ end
     }
 };
 
+// CUSTOM-5
+/*std::optional<std::vector<Comment>> test_getCommentsForThing(std::vector<Comment>* commentLocations, const Location* definedLocation)
+{
+    std::vector<Comment> commentResults;
+
+    auto isInbetween = [&](const Comment& comment, const Position& start, const Position& end) -> bool
+    {
+        if (comment.location.begin >= start && end >= comment.location.end)
+            return true;
+        else
+            return false;
+    };
+
+    auto insertComment = [&](const Comment& comment)
+    {
+        commentResults.emplace(commentResults.begin(), comment);
+    };
+
+    // "- 1" could be removed, which would allow to check for inline comments
+    Position startSearchPos = Position(definedLocation->begin.line - 1, 0);
+    const Comment* lastComment = nullptr;
+
+    // Reverse loop
+    // We go from bottom to top, comments are meant to be defined at the top
+    for (auto it = commentLocations->rbegin(); it != commentLocations->rend(); ++it)
+    {
+        const Comment& comment = *it;
+        if (isInbetween(comment, startSearchPos, definedLocation->end))
+        {
+            insertComment(comment);
+            lastComment = &comment;
+            continue;
+        }
+        else
+        {
+            // If not, let's go one more line up.
+            // But only if we found a comment before
+            if (lastComment)
+            {
+                startSearchPos.line -= 1;
+                if (isInbetween(comment, startSearchPos, definedLocation->end))
+                {
+                    insertComment(comment);
+                    lastComment = &comment;
+                }
+            }
+            else
+                break;
+        }
+    }
+
+    if (commentResults.empty())
+        return std::nullopt;
+    return std::move(commentResults);
+}*/
+
+
 TEST_SUITE_BEGIN("FragmentSelectionSpecTests");
+
+// CUSTOM-5
+/*TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "comment_custom_test1")
+{
+    DOES_NOT_PASS_NEW_SOLVER_GUARD();
+
+    const std::string source = R"(
+    -- nope
+
+    --[[
+        a
+    ]]
+    -- b
+    --[[c]] --[[d]]
+    function testA() end
+    test
+    )";
+    fileResolver.source["game/A"] = source;
+
+    FrontendOptions opts;
+    opts.forAutocomplete = true;
+    getFrontend().setLuauSolverMode(FFlag::LuauSolverV2 ? SolverMode::New : SolverMode::Old);
+    getFrontend().check("game/A", opts);
+    CHECK_NE(getFrontend().moduleResolverForAutocomplete.getModule("game/A"), nullptr);
+    CHECK_EQ(getFrontend().moduleResolver.getModule("game/A"), nullptr);
+    ParseOptions parseOptions;
+    parseOptions.captureComments = true;
+    SourceModule sourceMod;
+    ParseResult parseResult = Parser::parse(source.c_str(), source.length(), *sourceMod.names, *sourceMod.allocator, parseOptions);
+    FragmentContext context{source, parseResult, opts, std::nullopt};
+
+    FragmentAutocompleteStatusResult frag = Luau::tryFragmentAutocomplete(
+        getFrontend(), "game/A", Position{9, 8}, context, nullCallback
+    );
+    REQUIRE(frag.result);
+
+    auto result = frag.result;
+    CHECK(result->acResults.entryMap.size() > 0);
+    AutocompleteEntry entry1 = result->acResults.entryMap["testA"];
+
+    if (auto fnTy = get_if<FunctionType>(&entry1.type.value()->ty))
+    {
+        auto test = test_getCommentsForThing(&parseResult.commentLocations, &fnTy->definition.value().definitionLocation);
+    }
+}*/
 
 TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "just_two_locals")
 {
