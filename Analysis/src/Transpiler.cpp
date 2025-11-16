@@ -1572,6 +1572,9 @@ struct Printer
         case AstAttr::Deprecated:
             writer.keyword("@deprecated");
             break;
+        case AstAttr::Unknown:
+            writer.keyword("@" + std::string{attribute.name.value});
+            break;
         }
     }
 

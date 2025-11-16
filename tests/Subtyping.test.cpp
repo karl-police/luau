@@ -16,11 +16,12 @@
 #include <initializer_list>
 
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(LuauEagerGeneralization4)
-LUAU_FASTFLAG(LuauReturnMappedGenericPacksFromSubtyping2)
+LUAU_FASTFLAG(LuauReturnMappedGenericPacksFromSubtyping3)
 LUAU_FASTFLAG(LuauSubtypingGenericsDoesntUseVariance)
 LUAU_FASTFLAG(LuauVariadicAnyPackShouldBeErrorSuppressing)
 LUAU_FASTFLAG(LuauSubtypingGenericPacksDoesntUseVariance)
+LUAU_FASTFLAG(LuauPassBindableGenericsByReference)
+LUAU_FASTFLAG(LuauConsiderErrorSuppressionInTypes)
 
 using namespace Luau;
 
@@ -76,6 +77,7 @@ struct SubtypeFixture : Fixture
     TypeFunctionRuntime typeFunctionRuntime{NotNull{&iceReporter}, NotNull{&limits}};
 
     ScopedFastFlag sff{FFlag::LuauSolverV2, true};
+    ScopedFastFlag sff1{FFlag::LuauPassBindableGenericsByReference, true};
 
     ScopePtr rootScope{new Scope(getBuiltins()->emptyTypePack)};
     ScopePtr moduleScope{new Scope(rootScope)};
@@ -199,7 +201,7 @@ struct SubtypeFixture : Fixture
 
     SubtypingResult isSubtype(TypePackId subTy, TypePackId superTy)
     {
-        return subtyping.isSubtype(subTy, superTy, NotNull{rootScope.get()});
+        return subtyping.isSubtype(subTy, superTy, NotNull{rootScope.get()}, {});
     }
 
     TypeId helloType = arena.addType(SingletonType{StringSingleton{"hello"}});
@@ -217,7 +219,7 @@ struct SubtypeFixture : Fixture
     TypeId booleanAndTrueType = meet(getBuiltins()->booleanType, getBuiltins()->trueType);
 
     /**
-     * class
+     * userdata
      * \- Root
      *    |- Child
      *    |  |-GrandchildOne
@@ -973,12 +975,12 @@ TEST_IS_NOT_SUBTYPE(getBuiltins()->unknownType, negate(getBuiltins()->stringType
 TEST_IS_NOT_SUBTYPE(getBuiltins()->unknownType, negate(getBuiltins()->threadType));
 TEST_IS_NOT_SUBTYPE(getBuiltins()->unknownType, negate(getBuiltins()->bufferType));
 
-TEST_CASE_FIXTURE(SubtypeFixture, "Root <: class")
+TEST_CASE_FIXTURE(SubtypeFixture, "Root <: userdata")
 {
     CHECK_IS_SUBTYPE(rootClass, getBuiltins()->externType);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "Child | AnotherChild <: class")
+TEST_CASE_FIXTURE(SubtypeFixture, "Child | AnotherChild <: userdata")
 {
     CHECK_IS_SUBTYPE(join(childClass, anotherChildClass), getBuiltins()->externType);
 }
@@ -993,17 +995,17 @@ TEST_CASE_FIXTURE(SubtypeFixture, "Child | Root <: Root")
     CHECK_IS_SUBTYPE(join(childClass, rootClass), rootClass);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "Child & AnotherChild <: class")
+TEST_CASE_FIXTURE(SubtypeFixture, "Child & AnotherChild <: userdata")
 {
     CHECK_IS_SUBTYPE(meet(childClass, anotherChildClass), getBuiltins()->externType);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "Child & Root <: class")
+TEST_CASE_FIXTURE(SubtypeFixture, "Child & Root <: userdata")
 {
     CHECK_IS_SUBTYPE(meet(childClass, rootClass), getBuiltins()->externType);
 }
 
-TEST_CASE_FIXTURE(SubtypeFixture, "Child & ~Root <: class")
+TEST_CASE_FIXTURE(SubtypeFixture, "Child & ~Root <: userdata")
 {
     CHECK_IS_SUBTYPE(meet(childClass, negate(rootClass)), getBuiltins()->externType);
 }
@@ -1404,7 +1406,7 @@ TEST_CASE_FIXTURE(SubtypeFixture, "<T>({ x: T }) -> T <: ({ method: <T>({ x: T }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "subtyping_reasonings_to_follow_a_reduced_type_function_instance")
 {
-    ScopedFastFlag sff{FFlag::LuauReturnMappedGenericPacksFromSubtyping2, true};
+    ScopedFastFlag sff{FFlag::LuauReturnMappedGenericPacksFromSubtyping3, true};
     ScopedFastFlag sff1{FFlag::LuauSubtypingGenericPacksDoesntUseVariance, true};
 
     TypeId longTy = arena.addType(
@@ -1435,6 +1437,62 @@ TEST_CASE_FIXTURE(SubtypeFixture, "subtyping_reasonings_to_follow_a_reduced_type
         std::optional<TypeOrPack> optSuperLeaf = traverse(superTy, reasoning.superPath, getBuiltins(), NotNull{&arena});
 
         if (!optSubLeaf || !optSuperLeaf)
+            CHECK(false);
+    }
+}
+
+TEST_CASE_FIXTURE(SubtypeFixture, "subtyping_reasonings_check_for_error_suppression_in_union_type_path")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauConsiderErrorSuppressionInTypes, true},
+        {FFlag::LuauSubtypingGenericPacksDoesntUseVariance, true},
+    };
+
+    TypeId subTy = arena.addType(UnionType{{getBuiltins()->numberType, getBuiltins()->errorType}});
+    TypeId superTy = getBuiltins()->booleanType;
+    SubtypingResult result = isSubtype(subTy, superTy);
+    CHECK(!result.isSubtype);
+
+    for (const SubtypingReasoning& reasoning : result.reasoning)
+    {
+        if (reasoning.subPath.empty() && reasoning.superPath.empty())
+            continue;
+
+        std::optional<TypeId> optSubLeaf = traverseForType(subTy, reasoning.subPath, getBuiltins(), NotNull{&arena});
+        std::optional<TypeId> optSuperLeaf = traverseForType(superTy, reasoning.superPath, getBuiltins(), NotNull{&arena});
+
+        if (!optSubLeaf || !optSuperLeaf)
+            CHECK(false);
+
+        if (optSubLeaf != getBuiltins()->errorType)
+            CHECK(false);
+    }
+}
+
+TEST_CASE_FIXTURE(SubtypeFixture, "subtyping_reasonings_check_for_error_suppression_in_intersect_type_path")
+{
+    ScopedFastFlag sffs[] = {
+        {FFlag::LuauConsiderErrorSuppressionInTypes, true},
+        {FFlag::LuauSubtypingGenericPacksDoesntUseVariance, true},
+    };
+
+    TypeId subTy = getBuiltins()->booleanType;
+    TypeId superTy = arena.addType(IntersectionType{{getBuiltins()->numberType, getBuiltins()->errorType}});
+    SubtypingResult result = isSubtype(subTy, superTy);
+    CHECK(!result.isSubtype);
+
+    for (const SubtypingReasoning& reasoning : result.reasoning)
+    {
+        if (reasoning.subPath.empty() && reasoning.superPath.empty())
+            continue;
+
+        std::optional<TypeId> optSubLeaf = traverseForType(subTy, reasoning.subPath, getBuiltins(), NotNull{&arena});
+        std::optional<TypeId> optSuperLeaf = traverseForType(superTy, reasoning.superPath, getBuiltins(), NotNull{&arena});
+
+        if (!optSubLeaf || !optSuperLeaf)
+            CHECK(false);
+
+        if (optSuperLeaf != getBuiltins()->errorType)
             CHECK(false);
     }
 }
@@ -1756,10 +1814,6 @@ TEST_CASE_FIXTURE(SubtypeFixture, "substitute_a_generic_for_a_negation")
 
 TEST_CASE_FIXTURE(SubtypeFixture, "free_types_might_be_subtypes")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauEagerGeneralization4, true},
-    };
-
     TypeId argTy = arena.freshType(getBuiltins(), moduleScope.get());
     FreeType* freeArg = getMutable<FreeType>(argTy);
     REQUIRE(freeArg);

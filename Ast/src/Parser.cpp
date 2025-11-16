@@ -23,6 +23,7 @@ LUAU_FASTFLAGVARIABLE(LuauParseFixASTDeclareFunctionLocationStart)
 LUAU_FASTFLAGVARIABLE(LuauParseIncompleteInterpStringsWithLocation)
 LUAU_FASTFLAGVARIABLE(LuauParametrizedAttributeSyntax)
 LUAU_FASTFLAGVARIABLE(DebugLuauStringSingletonBasedOnQuotes)
+LUAU_FASTFLAGVARIABLE(LuauAutocompleteAttributes)
 
 // Clip with DebugLuauReportReturnTypeVariadicWithTypeSuffix
 bool luau_telemetry_parsed_return_type_variadic_with_type_suffix = false;
@@ -935,8 +936,15 @@ void Parser::parseAttribute(TempVector<AstAttr*>& attributes)
 
         nextLexeme();
 
-        if (type)
-            attributes.push_back(allocator.alloc<AstAttr>(loc, *type, empty));
+        if (FFlag::LuauAutocompleteAttributes)
+        {
+            attributes.push_back(allocator.alloc<AstAttr>(loc, type.value_or(AstAttr::Type::Unknown), empty, AstName(name)));
+        }
+        else
+        {
+            if (type)
+                attributes.push_back(allocator.alloc<AstAttr>(loc, *type, empty));
+        }
     }
     else
     {
@@ -966,14 +974,30 @@ void Parser::parseAttribute(TempVector<AstAttr*>& attributes)
 
                     std::optional<AstAttr::Type> type = validateAttribute(nameLoc, attrName, attributes, args);
 
-                    if (type)
-                        attributes.push_back(allocator.alloc<AstAttr>(Location(nameLoc, argsLocation), *type, args));
+                    if (FFlag::LuauAutocompleteAttributes)
+                    {
+                        attributes.push_back(
+                            allocator.alloc<AstAttr>(Location(nameLoc, argsLocation), type.value_or(AstAttr::Type::Unknown), args, AstName(attrName))
+                        );
+                    }
+                    else
+                    {
+                        if (type)
+                            attributes.push_back(allocator.alloc<AstAttr>(Location(nameLoc, argsLocation), *type, args));
+                    }
                 }
                 else
                 {
                     std::optional<AstAttr::Type> type = validateAttribute(nameLoc, attrName, attributes, empty);
-                    if (type)
-                        attributes.push_back(allocator.alloc<AstAttr>(nameLoc, *type, empty));
+                    if (FFlag::LuauAutocompleteAttributes)
+                    {
+                        attributes.push_back(allocator.alloc<AstAttr>(nameLoc, type.value_or(AstAttr::Type::Unknown), empty, AstName(attrName)));
+                    }
+                    else
+                    {
+                        if (type)
+                            attributes.push_back(allocator.alloc<AstAttr>(nameLoc, *type, empty));
+                    }
                 }
 
                 if (lexer.current().type == ',')
@@ -989,6 +1013,14 @@ void Parser::parseAttribute(TempVector<AstAttr*>& attributes)
         else
         {
             report(Location(open.location, lexer.current().location), "Attribute list cannot be empty");
+
+            if (FFlag::LuauAutocompleteAttributes)
+            {
+                // autocomplete expects at least one unknown attribute.
+                attributes.push_back(
+                    allocator.alloc<AstAttr>(Location(open.location, lexer.current().location), AstAttr::Type::Unknown, empty, nameError)
+                );
+            }
         }
 
         expectMatchAndConsume(']', open);

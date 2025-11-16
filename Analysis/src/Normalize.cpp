@@ -22,10 +22,11 @@ LUAU_FASTINTVARIABLE(LuauNormalizeCacheLimit, 100000)
 LUAU_FASTINTVARIABLE(LuauNormalizeIntersectionLimit, 200)
 LUAU_FASTINTVARIABLE(LuauNormalizeUnionLimit, 100)
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAGVARIABLE(LuauNormalizationReorderFreeTypeIntersect)
 LUAU_FASTFLAG(LuauUseWorkspacePropToChooseSolver)
-LUAU_FASTFLAGVARIABLE(LuauNormalizationLimitTyvarUnionSize)
 LUAU_FASTFLAG(LuauReduceSetTypeStackPressure)
+LUAU_FASTFLAGVARIABLE(LuauImproveNormalizeExternTypeCheck)
+LUAU_FASTFLAG(LuauPassBindableGenericsByReference)
+LUAU_FASTFLAGVARIABLE(LuauNormalizerUnionTyvarsTakeMaxSize)
 
 namespace Luau
 {
@@ -145,7 +146,8 @@ bool NormalizedFunctionType::isNever() const
 }
 
 NormalizedType::NormalizedType(NotNull<BuiltinTypes> builtinTypes)
-    : tops(builtinTypes->neverType)
+    : builtinTypes(builtinTypes)
+    , tops(builtinTypes->neverType)
     , booleans(builtinTypes->neverType)
     , errors(builtinTypes->neverType)
     , nils(builtinTypes->neverType)
@@ -171,10 +173,21 @@ bool NormalizedType::isUnknown() const
     {
         if (auto ct = get<ExternType>(t))
         {
-            if (ct->name == "class" && disj.empty())
+            if (FFlag::LuauImproveNormalizeExternTypeCheck)
             {
-                isTopExternType = true;
-                break;
+                if (t == builtinTypes->externType && disj.empty())
+                {
+                    isTopExternType = true;
+                    break;
+                }
+            }
+            else
+            {
+                if (ct->name == "userdata" && disj.empty())
+                {
+                    isTopExternType = true;
+                    break;
+                }
             }
         }
     }
@@ -306,6 +319,15 @@ bool NormalizedType::isFalsy() const
 bool NormalizedType::isTruthy() const
 {
     return !isFalsy();
+}
+
+bool NormalizedType::isNil() const
+{
+    if (!hasNils())
+        return false;
+
+    return !hasTops() && !hasBooleans() && !hasExternTypes() && !hasNumbers() && !hasStrings() && !hasThreads() && !hasBuffers() && !hasTables() &&
+           !hasFunctions() && !hasTyvars();
 }
 
 static bool isShallowInhabited(const NormalizedType& norm)
@@ -1531,7 +1553,13 @@ NormalizationResult Normalizer::unionNormals(NormalizedType& here, const Normali
         return NormalizationResult::True;
     }
 
-    if (FFlag::LuauNormalizationLimitTyvarUnionSize)
+    if (FFlag::LuauNormalizerUnionTyvarsTakeMaxSize)
+    {
+        auto maxSize = std::max(here.tyvars.size(), there.tyvars.size());
+        if (maxSize * maxSize >= size_t(FInt::LuauNormalizeUnionLimit))
+            return NormalizationResult::HitLimits;
+    }
+    else
     {
         if (here.tyvars.size() * there.tyvars.size() >= size_t(FInt::LuauNormalizeUnionLimit))
             return NormalizationResult::HitLimits;
@@ -2920,20 +2948,17 @@ NormalizationResult Normalizer::intersectNormals(NormalizedType& here, const Nor
     if (here.functions.parts.size() * there.functions.parts.size() >= size_t(FInt::LuauNormalizeIntersectionLimit))
         return NormalizationResult::HitLimits;
 
-    if (FFlag::LuauNormalizationReorderFreeTypeIntersect)
+    for (auto& [tyvar, inter] : there.tyvars)
     {
-        for (auto& [tyvar, inter] : there.tyvars)
+        int index = tyvarIndex(tyvar);
+        if (ignoreSmallerTyvars < index)
         {
-            int index = tyvarIndex(tyvar);
-            if (ignoreSmallerTyvars < index)
+            auto [found, fresh] = here.tyvars.emplace(tyvar, std::make_unique<NormalizedType>(NormalizedType{builtinTypes}));
+            if (fresh)
             {
-                auto [found, fresh] = here.tyvars.emplace(tyvar, std::make_unique<NormalizedType>(NormalizedType{builtinTypes}));
-                if (fresh)
-                {
-                    NormalizationResult res = unionNormals(*found->second, here, index);
-                    if (res != NormalizationResult::True)
-                        return res;
-                }
+                NormalizationResult res = unionNormals(*found->second, here, index);
+                if (res != NormalizationResult::True)
+                    return res;
             }
         }
     }
@@ -2949,24 +2974,6 @@ NormalizationResult Normalizer::intersectNormals(NormalizedType& here, const Nor
     here.buffers = (get<NeverType>(there.buffers) ? there.buffers : here.buffers);
     intersectFunctions(here.functions, there.functions);
     intersectTables(here.tables, there.tables);
-
-    if (!FFlag::LuauNormalizationReorderFreeTypeIntersect)
-    {
-        for (auto& [tyvar, inter] : there.tyvars)
-        {
-            int index = tyvarIndex(tyvar);
-            if (ignoreSmallerTyvars < index)
-            {
-                auto [found, fresh] = here.tyvars.emplace(tyvar, std::make_unique<NormalizedType>(NormalizedType{builtinTypes}));
-                if (fresh)
-                {
-                    NormalizationResult res = unionNormals(*found->second, here, index);
-                    if (res != NormalizationResult::True)
-                        return res;
-                }
-            }
-        }
-    }
 
     for (auto it = here.tyvars.begin(); it != here.tyvars.end();)
     {
@@ -3451,7 +3458,8 @@ bool isSubtype(
         {
             Subtyping subtyping{builtinTypes, NotNull{&arena}, simplifier, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&ice}};
 
-            return subtyping.isSubtype(subPack, superPack, scope).isSubtype;
+            return FFlag::LuauPassBindableGenericsByReference ? subtyping.isSubtype(subPack, superPack, scope, {}).isSubtype
+                                                              : subtyping.isSubtype_DEPRECATED(subPack, superPack, scope).isSubtype;
         }
         else
         {
@@ -3468,7 +3476,8 @@ bool isSubtype(
         {
             Subtyping subtyping{builtinTypes, NotNull{&arena}, simplifier, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&ice}};
 
-            return subtyping.isSubtype(subPack, superPack, scope).isSubtype;
+            return FFlag::LuauPassBindableGenericsByReference ? subtyping.isSubtype(subPack, superPack, scope, {}).isSubtype
+                                                              : subtyping.isSubtype_DEPRECATED(subPack, superPack, scope).isSubtype;
         }
         else
         {

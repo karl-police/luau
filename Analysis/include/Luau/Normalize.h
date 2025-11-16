@@ -202,6 +202,8 @@ enum class NormalizationResult
 // * G is a union of generic/free/blocked types, intersected with a normalized type
 struct NormalizedType
 {
+    NotNull<BuiltinTypes> builtinTypes;
+
     // The top part of the type.
     // This type is either never, unknown, or any.
     // If this type is not never, all the other fields are null.
@@ -280,6 +282,9 @@ struct NormalizedType
 
     /// Returns true if this type contains the primitve top table type, `table`.
     bool hasTopTable() const;
+
+    /// Returns true if this type is `nil` or `nil | *error-type*`
+    bool isNil() const;
 
     // Helpers that improve readability of the above (they just say if the component is present)
     bool hasTops() const;
