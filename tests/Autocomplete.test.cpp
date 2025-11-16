@@ -37,10 +37,6 @@ LUAU_FASTFLAG(LuauUserTypeFunTypecheck)
 LUAU_FASTFLAG(LuauTypeFunResultInAutocomplete)
 LUAU_FASTFLAG(LuauNonReentrantGeneralization3)
 
-LUAU_FASTFLAG(LuauEagerGeneralization4)
-LUAU_FASTFLAG(LuauImplicitTableIndexerKeys3)
-LUAU_FASTFLAG(LuauIncludeBreakContinueStatements)
-LUAU_FASTFLAG(LuauSolverAgnosticStringification)
 
 LUAU_FASTFLAG(LuauSuggestHotComments)
 LUAU_FASTFLAG(LuauUnfinishedRepeatAncestryFix)
@@ -227,8 +223,6 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK(ac.entryMap.count("math"));
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
-
-
 
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
 {
@@ -569,7 +563,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "keyof_andGeneralTypeFunction_dependency_issu
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverGenerator, true},
         //{FFlag::DebugLuauLogTypeFamilies, true},
-        {FFlag::LuauEagerGeneralization4, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
     };
 
@@ -601,7 +594,6 @@ TEST_CASE_FIXTURE(ACBuiltinsFixture, "typefunc_dependency_issue1")
         {FFlag::DebugLuauLogSolver, true},
         {FFlag::DebugLuauLogSolverMoreDetails, true},
         {FFlag::DebugLuauLogSolverGenerator, true},
-        {FFlag::LuauEagerGeneralization4, true},
         //{FFlag::DebugLuauMagicTypes, true},
         //{FFlag::DebugLuauLogBindings, true},
         //{FFlag::DebugLuauLogSolverToJson, true},
