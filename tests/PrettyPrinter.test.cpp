@@ -1606,7 +1606,7 @@ TEST_CASE_FIXTURE(Fixture, "transpile_declare_function_stat")
     auto names = AstNameTable{allocator};
     ParseResult parseResult = Parser::parse(code.data(), code.size(), names, allocator, options);
 
-    auto result = transpileWithTypes(*parseResult.root);
+    auto result = prettyPrintWithTypes(*parseResult.root);
 
     CHECK_EQ(result, code);
 }
@@ -1626,7 +1626,7 @@ end)";
     auto names = AstNameTable{allocator};
     ParseResult parseResult = Parser::parse(code.data(), code.size(), names, allocator, options);
 
-    auto result = transpileWithTypes(*parseResult.root);
+    auto result = prettyPrintWithTypes(*parseResult.root);
 
     CHECK_EQ(result, code);
 }*/
