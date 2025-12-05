@@ -140,7 +140,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "trace_transitive_table1")
         require(n)
     )");
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    //RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
 
     //AstStatLocal* local = block->body.data[1]->as<AstStatLocal>();
     //REQUIRE(local);
