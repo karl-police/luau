@@ -163,7 +163,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "trace_transitive_typeof2")
 
     //REQUIRE_EQ(3, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[1]->as<AstStatLocal>();
     REQUIRE(local);
@@ -183,7 +183,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "trace_transitive_typeof1")
 
     REQUIRE_EQ(3, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[1]->as<AstStatLocal>();
     REQUIRE(local);
