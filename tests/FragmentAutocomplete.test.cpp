@@ -33,6 +33,11 @@ LUAU_FASTFLAG(LuauDoNotSuggestGenericsInAnonFuncs)
 LUAU_FASTFLAG(LuauForInRangesConsiderInLocation)
 LUAU_FASTFLAG(LuauAutocompleteSingletonsInIndexer)
 
+// Debug
+LUAU_FASTFLAG(DebugLuauLogSolverGenerator)
+LUAU_FASTFLAG(DebugLuauLogSolver)
+LUAU_FASTFLAG(DebugLuauLogSolverMoreDetails)
+
 static std::optional<AutocompleteEntryMap> nullCallback(std::string tag, std::optional<const ExternType*> ptr, std::optional<std::string> contents)
 {
     return std::nullopt;
@@ -416,6 +421,61 @@ end
 
 
 TEST_SUITE_BEGIN("FragmentSelectionSpecTests");
+
+TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "idk_test1_frag")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        {FFlag::DebugLuauLogSolverGenerator, true},
+        {FFlag::DebugLuauLogSolver, true},
+        {FFlag::DebugLuauLogSolverMoreDetails, true},
+    };
+
+    const std::string source = R"(
+    --!strict
+    local mt = {}
+    mt.__index = mt
+
+    function mt.prepare(obj)
+	    obj.Value1 = 2
+	    return obj
+    end
+
+    local obj = setmetatable({}, mt)
+    obj = mt.prepare(obj)
+
+    
+    )";
+
+    const std::string updated = R"(
+    --!strict
+    local mt = {}
+    mt.__index = mt
+
+    function mt.prepare(obj)
+	    obj.Value1 = 2
+	    return obj
+    end
+
+    local obj = setmetatable({}, mt)
+    obj = mt.prepare(obj)
+
+    obj.@1
+    )";
+
+    autocompleteFragmentInNewSolver(
+        source,
+        updated,
+        '1',
+        [](FragmentAutocompleteStatusResult& fragment)
+        {
+            REQUIRE(fragment.result);
+            auto acResults = fragment.result->acResults;
+
+            CHECK(acResults.entryMap.size());
+        }
+    );
+}
 
 // CUSTOM-5
 /*TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "comment_custom_test1")
