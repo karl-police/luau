@@ -7,6 +7,7 @@
 #include "Luau/VisitType.h"
 #include "Luau/StringUtils.h"
 
+#include "Luau/PrettyPrinter.h"
 
 #include "ClassFixture.h"
 #include "Fixture.h"
@@ -217,37 +218,7 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
-{
-    ScopedFastFlag sff[]{
-        {FFlag::LuauSolverV2, true},
-        //{FFlag::DebugLuauLogSolverGenerator, true},
-        //{FFlag::DebugLuauLogSolver, true},
-        //{FFlag::DebugLuauLogSolverMoreDetails, true},
-        //{FFlag::LuauEagerGeneralization4, true}
-    };
-
-    CheckResult result = check(R"(
-        local mt = {}
-        mt.__index = mt
-
-        function mt.prepare(obj)
-	        obj.Value1 = 2
-	        return obj
-        end
-
-        local obj = setmetatable({}, mt)
-        obj = mt.prepare(obj)
-
-        obj.@1
-    )");
-
-    auto ac1 = autocomplete('1');
-
-    // LUAU_REQUIRE_NO_ERRORS(result);
-}
-
-TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1b")
 {
     ScopedFastFlag sff[]{
         {FFlag::LuauSolverV2, true},
