@@ -13,8 +13,7 @@
 #include <limits.h>
 
 LUAU_FASTFLAG(DebugLuauAbortingChecks)
-LUAU_FASTFLAG(LuauCodegenDirectCompare2)
-LUAU_FASTFLAG(LuauCodegenNilStoreInvalidateValue2)
+LUAU_FASTFLAG(LuauCodegenStorePriority)
 
 using namespace Luau::CodeGen;
 
@@ -1326,6 +1325,7 @@ bb_0:
    %0 = LOAD_TAG R1
    CHECK_TAG %0, tnumber, bb_fallback_3
    JUMP bb_1
+; glued to: bb_1
 
 bb_1:
    RETURN 1u
@@ -1365,6 +1365,7 @@ bb_0:
    %0 = LOAD_TAG R1
    CHECK_TAG %0, tnumber, bb_fallback_3
    JUMP bb_2
+; glued to: bb_2
 
 bb_2:
    RETURN 2u
@@ -1400,6 +1401,7 @@ bb_0:
    %0 = LOAD_TAG R1
    CHECK_TAG %0, tboolean
    JUMP bb_2
+; glued to: bb_2
 
 bb_2:
    RETURN 2u
@@ -1431,6 +1433,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "IntEqRemoval")
 bb_0:
    STORE_INT R1, 5i
    JUMP bb_1
+; glued to: bb_1
 
 bb_1:
    RETURN 1u
@@ -1462,6 +1465,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "NumCmpRemoval")
 bb_0:
    STORE_DOUBLE R1, 4
    JUMP bb_2
+; glued to: bb_2
 
 bb_2:
    RETURN 2u
@@ -1490,6 +1494,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "DataFlowsThroughDirectJumpToUniqueSuccessor
 bb_0:
    STORE_TAG R0, tnumber
    JUMP bb_1
+; glued to: bb_1
 
 bb_1:
    STORE_TAG R1, tnumber
@@ -1559,6 +1564,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "EntryBlockUseRemoval")
 bb_0:
    STORE_TAG R0, tnumber
    JUMP bb_1
+; glued to: bb_1
 
 bb_1:
    RETURN R0, 0i
@@ -1597,6 +1603,7 @@ bb_0:
 bb_1:
    STORE_TAG R0, tnumber
    JUMP bb_2
+; glued to: bb_2
 
 bb_2:
    RETURN R0, 0i
@@ -1635,6 +1642,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "RecursiveSccUseRemoval2")
     CHECK("\n" + toString(build.function, IncludeUseInfo::No) == R"(
 bb_0:
    JUMP bb_1
+; glued to: bb_1
 
 bb_1:
    RETURN R0, 0i
@@ -1642,6 +1650,7 @@ bb_1:
 bb_2:
    STORE_TAG R0, tnumber
    JUMP bb_3
+; glued to: bb_3
 
 bb_3:
    RETURN R0, 0i
@@ -1774,8 +1783,6 @@ bb_0:
 
 TEST_CASE_FIXTURE(IrBuilderFixture, "CmpTagSimplification")
 {
-    ScopedFastFlag luauCodegenDirectCompare{FFlag::LuauCodegenDirectCompare2, true};
-
     IrOp block = build.block(IrBlockKind::Internal);
 
     build.beginBlock(block);
@@ -1806,8 +1813,6 @@ bb_0:
 
 TEST_CASE_FIXTURE(IrBuilderFixture, "CmpSplitTagValueSimplification")
 {
-    ScopedFastFlag luauCodegenDirectCompare{FFlag::LuauCodegenDirectCompare2, true};
-
     IrOp block = build.block(IrBlockKind::Internal);
 
     build.beginBlock(block);
@@ -1937,6 +1942,7 @@ bb_0:
    %0 = LOAD_TAG R2
    CHECK_TAG %0, tnumber, bb_fallback_1
    JUMP bb_linear_6
+; glued to: bb_linear_6
 
 bb_fallback_1:
    DO_LEN R1, R2
@@ -1953,6 +1959,7 @@ bb_fallback_3:
 
 bb_4:
    JUMP bb_5
+; glued to: bb_5
 
 bb_5:
    RETURN R0, 0i
@@ -2917,6 +2924,49 @@ bb_0:
 )");
 }
 
+TEST_CASE_FIXTURE(IrBuilderFixture, "DoNotProduceInvalidSplitStore3")
+{
+    ScopedFastFlag luauCodegenStorePriority{FFlag::LuauCodegenStorePriority, true};
+
+    IrOp entry = build.block(IrBlockKind::Internal);
+
+    build.beginBlock(entry);
+
+    // Obscure the R0 state by only storing the value (tag was established in a previous block not visible here)
+    build.inst(IrCmd::STORE_INT, build.vmReg(0), build.constInt(2));
+
+    // In the future, STORE_INT might imply that the tag is LUA_TBOOLEAN, but today it is used for other integer stores too
+    build.inst(IrCmd::CHECK_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(0)), build.constTag(tnumber), build.vmExit(1));
+
+    // Secondary load for store propagation
+    build.inst(IrCmd::STORE_TAG, build.vmReg(2), build.constTag(tnumber));
+    build.inst(IrCmd::STORE_DOUBLE, build.vmReg(2), build.inst(IrCmd::LOAD_DOUBLE, build.vmReg(0)));
+
+    build.inst(IrCmd::STORE_TVALUE, build.vmReg(1), build.inst(IrCmd::LOAD_TVALUE, build.vmReg(0)));
+    build.inst(IrCmd::STORE_INT, build.vmReg(1), build.constInt(2));
+    build.inst(IrCmd::STORE_TAG, build.vmReg(1), build.constTag(tboolean));
+    build.inst(IrCmd::RETURN, build.vmReg(1), build.constInt(1));
+
+    updateUseCounts(build.function);
+    computeCfgInfo(build.function);
+    constPropInBlockChains(build);
+
+    CHECK("\n" + toString(build.function, IncludeUseInfo::No) == R"(
+bb_0:
+   STORE_INT R0, 2i
+   %1 = LOAD_TAG R0
+   CHECK_TAG %1, tnumber, exit(1)
+   STORE_TAG R2, tnumber
+   %4 = LOAD_DOUBLE R0
+   STORE_DOUBLE R2, %4
+   %6 = LOAD_TVALUE R0
+   STORE_TVALUE R1, %6
+   STORE_TAG R1, tboolean
+   RETURN R1, 1i
+
+)");
+}
+
 TEST_SUITE_END();
 
 TEST_SUITE_BEGIN("Analysis");
@@ -3731,6 +3781,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "TagSelfEqualityCheckRemoval")
     CHECK("\n" + toString(build.function, IncludeUseInfo::No) == R"(
 bb_0:
    JUMP bb_1
+; glued to: bb_1
 
 bb_1:
    RETURN 1u
@@ -4098,6 +4149,7 @@ bb_0:
    STORE_TAG R1, tnumber
    STORE_DOUBLE R1, 1
    JUMP bb_1
+; glued to: bb_1
 
 bb_1:
 ; predecessors: bb_0
@@ -4776,8 +4828,6 @@ bb_0:
 
 TEST_CASE_FIXTURE(IrBuilderFixture, "NilStoreImplicitValueClear1")
 {
-    ScopedFastFlag luauCodegenNilStoreInvalidateValue2{FFlag::LuauCodegenNilStoreInvalidateValue2, true};
-
     IrOp entry = build.block(IrBlockKind::Internal);
 
     build.beginBlock(entry);
@@ -4805,8 +4855,6 @@ bb_0:
 
 TEST_CASE_FIXTURE(IrBuilderFixture, "NilStoreImplicitValueClear2")
 {
-    ScopedFastFlag luauCodegenNilStoreInvalidateValue2{FFlag::LuauCodegenNilStoreInvalidateValue2, true};
-
     IrOp entry = build.block(IrBlockKind::Internal);
 
     build.beginBlock(entry);

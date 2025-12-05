@@ -5,17 +5,16 @@
 #include "Luau/AstQuery.h"
 #include "Luau/Common.h"
 #include "Luau/Type.h"
+#include "ScopedFlags.h"
 #include "doctest.h"
 
 #include "Luau/Normalize.h"
-#include "Luau/BuiltinDefinitions.h"
 #include <memory>
 
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTINT(LuauNormalizeIntersectionLimit)
 LUAU_FASTINT(LuauNormalizeUnionLimit)
-LUAU_FASTFLAG(LuauReturnMappedGenericPacksFromSubtyping3)
 LUAU_FASTFLAG(LuauNormalizerUnionTyvarsTakeMaxSize)
 
 using namespace Luau;
@@ -32,14 +31,11 @@ struct IsSubtypeFixture : Fixture
         if (!module->hasModuleScope())
             FAIL("isSubtype: module scope data is not available");
 
-        SimplifierPtr simplifier = newSimplifier(NotNull{&module->internalTypes}, getBuiltins());
-
         return ::Luau::isSubtype(
             a,
             b,
             NotNull{module->getModuleScope().get()},
             getBuiltins(),
-            NotNull{simplifier.get()},
             ice,
             FFlag::LuauSolverV2 ? SolverMode::New : SolverMode::Old
         );
@@ -104,9 +100,10 @@ TEST_CASE_FIXTURE(IsSubtypeFixture, "variadic_functions_with_no_head")
     CHECK(!isSubtype(a, b));
 }
 
-#if 0
 TEST_CASE_FIXTURE(IsSubtypeFixture, "variadic_function_with_head")
 {
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
+
     check(R"(
         local a: (...number) -> ()
         local b: (number, number) -> ()
@@ -118,7 +115,6 @@ TEST_CASE_FIXTURE(IsSubtypeFixture, "variadic_function_with_head")
     CHECK(!isSubtype(b, a));
     CHECK(isSubtype(a, b));
 }
-#endif
 
 TEST_CASE_FIXTURE(IsSubtypeFixture, "union")
 {
@@ -253,9 +249,10 @@ TEST_CASE_FIXTURE(IsSubtypeFixture, "tables")
     CHECK(!isSubtype(b, d));
 }
 
-#if 0
 TEST_CASE_FIXTURE(IsSubtypeFixture, "table_indexers_are_invariant")
 {
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
+
     check(R"(
         local a: {[string]: number}
         local b: {[string]: any}
@@ -275,6 +272,8 @@ TEST_CASE_FIXTURE(IsSubtypeFixture, "table_indexers_are_invariant")
 
 TEST_CASE_FIXTURE(IsSubtypeFixture, "mismatched_indexers")
 {
+    ScopedFastFlag _{FFlag::LuauSolverV2, true};
+
     check(R"(
         local a: {x: number}
         local b: {[string]: number}
@@ -292,6 +291,7 @@ TEST_CASE_FIXTURE(IsSubtypeFixture, "mismatched_indexers")
     CHECK(isSubtype(b, c));
 }
 
+#if 0
 TEST_CASE_FIXTURE(IsSubtypeFixture, "cyclic_table")
 {
     check(R"(
@@ -1274,13 +1274,11 @@ do end
         InternalCompilerError
     );
 }
+
 #if 0
 TEST_CASE_FIXTURE(BuiltinsFixture, "fuzz_union_type_pack_cycle")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauSolverV2, true},
-        {FFlag::LuauReturnMappedGenericPacksFromSubtyping3, true},
-    };
+    ScopedFastFlag sff{FFlag::LuauSolverV2, true};
     ScopedFastInt sfi{FInt::LuauTypeInferRecursionLimit, 0};
 
     // FIXME CLI-153131: This is constructing a cyclic type pack

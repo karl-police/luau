@@ -60,7 +60,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "trace_local")
         require(m)
     )");
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
     REQUIRE(!result.exprs.empty());
 
     AstStatLocal* loc = block->body.data[0]->as<AstStatLocal>();
@@ -203,7 +203,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "trace_transitive_local")
 
     REQUIRE_EQ(3, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[1]->as<AstStatLocal>();
     REQUIRE(local);
@@ -220,7 +220,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "trace_function_arguments")
     )");
     REQUIRE_EQ(1, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[0]->as<AstStatLocal>();
     REQUIRE(local != nullptr);
@@ -242,7 +242,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "follow_typeof")
     )");
     REQUIRE_EQ(1, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[0]->as<AstStatLocal>();
     REQUIRE(local != nullptr);
@@ -274,7 +274,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "follow_typeof_in_return_type")
     )");
     REQUIRE_EQ(1, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatFunction* func = block->body.data[0]->as<AstStatFunction>();
     REQUIRE(func != nullptr);
@@ -307,7 +307,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "follow_string_indexexpr")
     )");
     REQUIRE_EQ(2, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[0]->as<AstStatLocal>();
     REQUIRE(local != nullptr);
@@ -323,7 +323,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "follow_group")
     )");
     REQUIRE_EQ(2, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[0]->as<AstStatLocal>();
     REQUIRE(local != nullptr);
@@ -339,7 +339,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "follow_type_annotation")
     )");
     REQUIRE_EQ(2, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[0]->as<AstStatLocal>();
     REQUIRE(local != nullptr);
@@ -356,7 +356,7 @@ TEST_CASE_FIXTURE(RequireTracerFixture, "follow_type_annotation_2")
     )");
     REQUIRE_EQ(3, block->body.size);
 
-    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName");
+    RequireTraceResult result = traceRequires(&fileResolver, block, "ModuleName", {});
 
     AstStatLocal* local = block->body.data[1]->as<AstStatLocal>();
     REQUIRE(local != nullptr);
