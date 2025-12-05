@@ -6,7 +6,7 @@
 
 
 // Remove after TESTING
-#include "Luau/Transpiler.h"
+#include "Luau/PrettyPrinter.h"
 #include "Luau/AstJsonEncoder.h"
 
 LUAU_FASTFLAGVARIABLE(DebugLuauLogRequireTracer) // custom flag
