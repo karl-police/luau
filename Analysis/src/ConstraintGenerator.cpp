@@ -29,7 +29,7 @@
 #include "Luau/VisitType.h"
 
 // CUSTOM-2 for TESTING
-#include "Luau/Transpiler.h"
+#include "Luau/PrettyPrinter.h"
 #include "Luau/AstJsonEncoder.h"
 
 #include <algorithm>
