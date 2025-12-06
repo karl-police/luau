@@ -442,6 +442,7 @@ TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "idk_test1_frag")
     end
 
     local obj = setmetatable({}, mt)
+    obj.test1 = 1
     obj = mt.prepare(obj)
 
     
@@ -458,6 +459,7 @@ TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "idk_test1_frag")
     end
 
     local obj = setmetatable({}, mt)
+    obj.test1 = 1
     obj = mt.prepare(obj)
 
     obj.@1
