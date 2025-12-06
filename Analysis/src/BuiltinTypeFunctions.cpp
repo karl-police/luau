@@ -2788,6 +2788,9 @@ void BuiltinTypeFunctions::addToScope(NotNull<TypeArena> arena, NotNull<Scope> s
 
     scope->exportedTypeBindings[setmetatableFunc.name] = mkBinaryTypeFunction(&setmetatableFunc);
     scope->exportedTypeBindings[getmetatableFunc.name] = mkUnaryTypeFunction(&getmetatableFunc);
+
+    // Testing
+    scope->exportedTypeBindings[tabletypeFunc.name] = mkUnaryTypeFunction(&tabletypeFunc);
 }
 
 
