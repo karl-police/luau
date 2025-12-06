@@ -218,6 +218,37 @@ TEST_CASE_FIXTURE(ACFixture, "empty_program")
     CHECK_EQ(ac.context, AutocompleteContext::Statement);
 }
 
+TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1")
+{
+    ScopedFastFlag sff[]{
+        {FFlag::LuauSolverV2, true},
+        //{FFlag::DebugLuauLogSolverGenerator, true},
+        //{FFlag::DebugLuauLogSolver, true},
+        //{FFlag::DebugLuauLogSolverMoreDetails, true},
+    };
+
+    CheckResult result = check(R"(
+--!strict
+function modify(input)
+	input.StarterValue1 = 1
+	return input
+end
+
+local tbl = {} -- <-- table was created in this scope
+local tbl2 = modify(tbl)
+local tbl3 = tbl2 :: tabletype<"Unsealed", typeof(tbl2)>
+
+tbl3.moreStuff = 2
+tbl3.@1
+    )");
+
+    auto test1 = requireType("tbl3");
+    auto ac1 = autocomplete('1');
+
+    // LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+
 TEST_CASE_FIXTURE(ACBuiltinsFixture, "idk_test1b")
 {
     ScopedFastFlag sff[]{
